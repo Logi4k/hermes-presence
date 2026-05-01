@@ -71,11 +71,31 @@ def setup_presence(
         provider=provider or getattr(agent, "provider", ""),
     )
 
-    # Hook tool completion
-    agent.tool_complete_callback = writer
+    # Chain (don't overwrite) tool callbacks so TUI callbacks survive.
+    _orig_tool_start = getattr(agent, "tool_start_callback", None)
+    _orig_tool_complete = getattr(agent, "tool_complete_callback", None)
+    _orig_tool_progress = getattr(agent, "tool_progress_callback", None)
 
-    # Also hook the existing tool_complete_callback if set
-    # (chain with original if needed)
+    def _chain_start(tc_id, name, args):
+        writer.on_tool_start(name, args)
+        if _orig_tool_start:
+            _orig_tool_start(tc_id, name, args)
+
+    def _chain_complete(tc_id, name, args, result):
+        writer.on_tool_complete(tc_id, name, args, result)
+        if _orig_tool_complete:
+            _orig_tool_complete(tc_id, name, args, result)
+
+    def _chain_progress(event_type, name=None, preview=None, args=None, **kwargs):
+        if event_type == "tool.started" and name:
+            writer.on_tool_start(name, args)
+        if _orig_tool_progress:
+            _orig_tool_progress(event_type, name, preview, args, **kwargs)
+
+    agent.tool_start_callback = _chain_start
+    agent.tool_complete_callback = _chain_complete
+    agent.tool_progress_callback = _chain_progress
+
     logger.info("Hermes Presence writer hooked (session=%s)", writer._session_id)
     return writer
 
