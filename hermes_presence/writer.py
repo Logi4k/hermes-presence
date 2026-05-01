@@ -27,15 +27,19 @@ PRESENCE_VERSION = 1
 
 STATE_FILE = Path.home() / ".hermes" / "state" / "presence.json"
 
-# Windows bridge: when running in WSL, also write to a path accessible
-# from the Windows side so hermes-presence.exe can poll it.
-# Default: %APPDATA%/hermes_presence.json -> /mnt/c/Users/<user>/AppData/Roaming/
-_WINDOWS_USER = os.environ.get("WINDOWS_USER", "").strip()
-if _WINDOWS_USER:
-    WINDOWS_STATE_FILE = Path(f"/mnt/c/Users/{_WINDOWS_USER}/AppData/Roaming/hermes_presence.json")
-else:
-    WINDOWS_STATE_FILE = os.environ.get("HERMES_PRESENCE_STATE", "").strip()
-    WINDOWS_STATE_FILE = Path(WINDOWS_STATE_FILE) if WINDOWS_STATE_FILE else None
+def _resolve_windows_state_file() -> Optional[Path]:
+    """Resolve the Windows-accessible state file path when running in WSL2.
+
+    Called at PresenceWriter init time (not module import) so env vars set
+    after import are still picked up.
+    """
+    windows_user = os.environ.get("WINDOWS_USER", "").strip()
+    if windows_user:
+        return Path(f"/mnt/c/Users/{windows_user}/AppData/Roaming/hermes_presence.json")
+    custom = os.environ.get("HERMES_PRESENCE_STATE", "").strip()
+    if custom:
+        return Path(custom)
+    return None
 
 
 class PresenceWriter:
@@ -51,6 +55,7 @@ class PresenceWriter:
     ):
         self._state_file = state_file or STATE_FILE
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
+        self._windows_state_file = _resolve_windows_state_file()
         self._lock = threading.Lock()
         self._session_id = session_id or f"session-{os.urandom(4).hex()}"
         self._source = source
@@ -96,13 +101,13 @@ class PresenceWriter:
         tmp.replace(self._state_file)
 
         # Mirror: Windows-accessible path (for WSL2 setups)
-        if WINDOWS_STATE_FILE:
+        if self._windows_state_file:
             try:
-                WINDOWS_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-                wtmp = WINDOWS_STATE_FILE.with_suffix(".tmp")
+                self._windows_state_file.parent.mkdir(parents=True, exist_ok=True)
+                wtmp = self._windows_state_file.with_suffix(".tmp")
                 with open(wtmp, "w") as f:
                     f.write(payload)
-                wtmp.replace(WINDOWS_STATE_FILE)
+                wtmp.replace(self._windows_state_file)
             except (OSError, PermissionError):
                 pass  # Windows path not available — silently skip
 

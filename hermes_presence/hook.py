@@ -29,7 +29,7 @@ def _auto_detect_wsl():
                 if os.path.isdir(users_dir):
                     for name in os.listdir(users_dir):
                         user_path = os.path.join(users_dir, name)
-                        if os.path.isdir(user_path) and name not in ("Public", "Default", "All Users", "desktop.ini"):
+                        if os.path.isdir(user_path) and name not in ("Public", "Default", "Default User", "All Users", "desktop.ini"):
                             os.environ["WINDOWS_USER"] = name
                             logger.debug("Auto-detected WSL Windows user: %s", name)
                             return
@@ -54,14 +54,15 @@ def setup_presence(
         model: Model name
         provider: Provider name
     """
+    # Auto-detect WSL2 Windows user BEFORE importing writer.py,
+    # because writer.py resolves WINDOWS_STATE_FILE at module level.
+    _auto_detect_wsl()
+
     try:
         from hermes_presence.writer import PresenceWriter
     except ImportError:
         logger.debug("hermes-presence not installed, skipping")
         return None
-
-    # Auto-detect WSL2 Windows user for dual-path state file output
-    _auto_detect_wsl()
 
     writer = PresenceWriter(
         session_id=session_id or getattr(agent, "session_id", ""),
