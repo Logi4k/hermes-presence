@@ -50,35 +50,7 @@ ACTIVITY_MAP = {
     "offline":    ("Offline", "Session ended"),
 }
 
-TOOL_ICON_MAP = {
-    "terminal":         "status_active",
-    "web_search":       "status_researching",
-    "web_extract":      "status_researching",
-    "session_search":   "status_researching",
-    "browser_navigate": "status_monitoring",
-    "browser_click":    "status_monitoring",
-    "browser_type":     "status_monitoring",
-    "browser_snapshot": "status_monitoring",
-    "browser_back":     "status_monitoring",
-    "browser_vision":   "status_monitoring",
-    "browser_console":  "status_monitoring",
-    "browser_scroll":   "status_monitoring",
-    "read_file":        "status_researching",
-    "write_file":       "status_working",
-    "patch":            "status_working",
-    "execute_code":     "status_active",
-    "delegate_task":    "status_monitoring",
-    "delegate_tasks":   "status_monitoring",
-    "send_message":     "status_active",
-    "memory":           "status_standby",
-    "skill_view":       "status_researching",
-    "skill_manage":     "status_researching",
-    "text_to_speech":   "status_active",
-    "image_generate":   "status_active",
-    "search_files":     "status_researching",
-    "todo":             "status_standby",
-    "clarify":          "status_standby",
-}
+from .tool_icons import TOOL_ICON_MAP
 
 
 def _detect_platform() -> str:
@@ -327,8 +299,10 @@ class UnifiedMonitor:
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
 
         if self.platform == "wsl2":
-            print("[info] WSL2 detected -- monitor must run on Windows side", flush=True)
-            print("[info] Use: hermes-presence install --wsl2", flush=True)
+            print("[FATAL] WSL2 detected -- Discord IPC does not work under WSL.", flush=True)
+            print("[FATAL] Run the monitor on the Windows side instead.", flush=True)
+            print("[FATAL] Install: hermes-presence install --wsl2", flush=True)
+            sys.exit(1)
 
         while True:
             prev_count = len(self.connections)
@@ -435,11 +409,12 @@ class UnifiedMonitor:
                     buttons.append(cb)
 
         # ---- Hash for change detection ----
+        # Use tool name + state, NOT the precise ISO timestamp
+        # (timestamp changes every second, causing unnecessary Discord pushes)
         hash_parts = [
             state_text, details, tool,
             str(sess.get("tool_calls_count", 0)),
             str(subagent_count),
-            str(tool_started_at),
         ]
         # Tier 4 additions
         hash_parts.append(str(sess.get("files_modified", 0)))
@@ -474,14 +449,13 @@ class UnifiedMonitor:
             files = sess.get("files_modified", 0)
             if files > 0:
                 extras.append(f"{files} files")
-            # Tier 4: cron
-            cron_jobs = state.get("cron", {}).get("active_jobs", 0)
-            if cron_jobs > 0:
-                extras.append(f"{cron_jobs} cron")
-            # Tier 4: orchestrator
-            orch_agents = state.get("orchestrator", {}).get("active_agents", 0)
-            if orch_agents > 0:
-                extras.append(f"{orch_agents} agents")
+            # Tier 4: cron/orchestrator (from session, not top-level state)
+            is_cron = sess.get("is_cron", False)
+            if is_cron:
+                extras.append("cron")
+            is_orch = sess.get("is_orchestrator", False)
+            if is_orch:
+                extras.append("orch")
 
             extra_str = f" ({', '.join(extras)})" if extras else ""
             print(f"[update -> pipes {pipe_list}] {state_text}: {details}{extra_str}", flush=True)

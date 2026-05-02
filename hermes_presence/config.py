@@ -10,7 +10,14 @@ CLI commands read/write the config file via Config.save().
 """
 
 import os
-import tomllib
+import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore
+    except ImportError:
+        tomllib = None
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -168,9 +175,10 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
                 if "pipe_connect_retry" in a:
                     config.advanced.pipe_connect_retry = int(a["pipe_connect_retry"])
 
-        except Exception:
-            # Corrupt config — use defaults
-            pass
+        except Exception as e:
+            # Corrupt config — warn and use defaults
+            print(f"[WARN] Could not parse config file ({path}): {e}", file=sys.stderr)
+            print("[WARN] Using default configuration.", file=sys.stderr)
 
     # Layer 2: Environment variables (highest priority)
     env_id = _env_client_id()
@@ -192,17 +200,20 @@ def save_config(config: PresenceConfig, config_path: Optional[Path] = None):
 
     d = _dataclass_to_dict(config)
 
-    # Remove keys with default/empty values for a cleaner file
+    # Remove keys with default/empty values for a cleaner file.
+    # Preserve prescribed fields even when empty/zero, and never
+    # strip lists (an empty list is a valid config, e.g. exclude_tools = [])
+    _keep = {"idle_timeout", "poll_interval"}
     for section_name, section_data in list(d.items()):
         if isinstance(section_data, dict):
-            # Remove empty strings, empty lists, False bools that are defaults
-            cleaned = {
-                k: v
-                for k, v in section_data.items()
-                if v not in ("", [], False, 0)
-                or k == "idle_timeout"  # keep even if 0
-                or k == "poll_interval"  # keep even if 0
-            }
+            cleaned = {}
+            for k, v in section_data.items():
+                if k in _keep:
+                    cleaned[k] = v
+                elif isinstance(v, list):
+                    cleaned[k] = v  # preserve empty lists
+                elif v not in ("", False, 0):
+                    cleaned[k] = v
             d[section_name] = cleaned
 
     # Remove entirely empty sections
