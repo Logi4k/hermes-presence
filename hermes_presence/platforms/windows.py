@@ -9,7 +9,6 @@ On WSL2: commands run through powershell.exe bridge automatically.
 
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 from . import PlatformLauncher
@@ -56,7 +55,9 @@ def _find_windows_username() -> str:
 
 
 _APPDATA = _resolve_appdata()
-STARTUP_DIR = Path(_APPDATA) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+STARTUP_DIR = (
+    Path(_APPDATA) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+)
 MONITOR_TARGET = Path(_APPDATA) / "hermes_presence_monitor.py"
 
 # Cache for python path discovery
@@ -97,7 +98,7 @@ def _run_win(cmd: list, timeout: int = 15) -> subprocess.CompletedProcess:
         full_cmd = [
             "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
             "-Command",
-            ps_line
+            ps_line,
         ]
     else:
         full_cmd = cmd
@@ -115,7 +116,9 @@ class WindowsLauncher(PlatformLauncher):
         self._task_name = "ApolloPresence" if profile == "apollo" else TASK_NAME
         # Monitor target differs for non-main
         self._monitor_target = Path(_APPDATA) / (
-            "apollo_presence_monitor.py" if profile == "apollo" else "hermes_presence_monitor.py"
+            "apollo_presence_monitor.py"
+            if profile == "apollo"
+            else "hermes_presence_monitor.py"
         )
         self._startup_bat_name = (
             "apollo_presence.bat" if profile == "apollo" else "hermes_presence.bat"
@@ -136,26 +139,38 @@ class WindowsLauncher(PlatformLauncher):
 
         # 1. Hermes venv — resolve dynamically
         username = _find_windows_username()
-        hermes_venv = Path(f"C:\\Users\\{username}\\.hermes\\hermes-agent\\venv\\Scripts\\python.exe")
+        hermes_venv = Path(
+            f"C:\\Users\\{username}\\.hermes\\hermes-agent\\venv\\Scripts\\python.exe"
+        )
         if hermes_venv.exists():
             candidates.append(str(hermes_venv))
         # Also try pipx-style install
-        pipx_venv = Path(f"C:\\Users\\{username}\\.hermes\\hermes-agent\\.venv\\Scripts\\python.exe")
+        pipx_venv = Path(
+            f"C:\\Users\\{username}\\.hermes\\hermes-agent\\.venv\\Scripts\\python.exe"
+        )
         if pipx_venv.exists():
             candidates.append(str(pipx_venv))
 
         # 2. Common install locations
         for ver in range(13, 8, -1):  # 3.13 down to 3.9
-            for base in [f"C:\\Python3{ver}\\python.exe", f"C:\\Program Files\\Python3{ver}\\python.exe"]:
+            for base in [
+                f"C:\\Python3{ver}\\python.exe",
+                f"C:\\Program Files\\Python3{ver}\\python.exe",
+            ]:
                 candidates.append(base)
 
         # 3. System 'where' / PowerShell discovery
         try:
             if _is_wsl():
                 result = subprocess.run(
-                    ["powershell.exe", "-Command",
-                     "(Get-Command python -ErrorAction SilentlyContinue).Source"],
-                    capture_output=True, text=True, timeout=5
+                    [
+                        "powershell.exe",
+                        "-Command",
+                        "(Get-Command python -ErrorAction SilentlyContinue).Source",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 for line in result.stdout.splitlines():
                     line = line.strip()
@@ -163,8 +178,7 @@ class WindowsLauncher(PlatformLauncher):
                         candidates.insert(0, line)
             else:
                 result = subprocess.run(
-                    ["where", "python"],
-                    capture_output=True, text=True, timeout=5
+                    ["where", "python"], capture_output=True, text=True, timeout=5
                 )
                 for line in result.stdout.splitlines():
                     line = line.strip()
@@ -204,20 +218,31 @@ class WindowsLauncher(PlatformLauncher):
 
         # Method 1: Try Scheduled Task (needs admin on some systems)
         try:
-            result = _run_win([
-                "schtasks", "/Create", "/TN", self._task_name,
-                "/SC", "ONLOGON",
-                "/TR", f'"{python_path}" "{win_target}"',
-                "/F",
-                "/RL", "LIMITED",
-                "/DELAY", "0000:30",
-            ])
+            result = _run_win(
+                [
+                    "schtasks",
+                    "/Create",
+                    "/TN",
+                    self._task_name,
+                    "/SC",
+                    "ONLOGON",
+                    "/TR",
+                    f'"{python_path}" "{win_target}"',
+                    "/F",
+                    "/RL",
+                    "LIMITED",
+                    "/DELAY",
+                    "0000:30",
+                ]
+            )
             if result.returncode == 0:
                 _run_win(["schtasks", "/Run", "/TN", self._task_name])
                 print("[OK] Scheduled Task created and started")
                 return True
             else:
-                print(f"[INFO] schtasks unavailable (this is fine): {result.stderr.strip()}")
+                print(
+                    f"[INFO] schtasks unavailable (this is fine): {result.stderr.strip()}"
+                )
         except Exception as e:
             print(f"[INFO] schtasks failed (will use startup folder fallback): {e}")
 
@@ -286,8 +311,7 @@ start "" /B "{py_path_clean}" "{win_target}"
         # Method 1: Check via schtasks
         try:
             result = _run_win(
-                ["schtasks", "/Query", "/TN", self._task_name, "/FO", "CSV"],
-                timeout=5
+                ["schtasks", "/Query", "/TN", self._task_name, "/FO", "CSV"], timeout=5
             )
             running = "Running" in result.stdout
         except Exception:
@@ -296,22 +320,30 @@ start "" /B "{py_path_clean}" "{win_target}"
         # Method 2: Fallback — check if any python process is running the presence monitor
         if not running:
             try:
-                monitor_name = "apollo_presence_monitor" if self.profile == "apollo" else "hermes_presence_monitor"
+                monitor_name = (
+                    "apollo_presence_monitor"
+                    if self.profile == "apollo"
+                    else "hermes_presence_monitor"
+                )
                 ps_cmd = (
-                    'Get-WmiObject Win32_Process -Filter "Name=\'python.exe\' OR Name=\'pythonw.exe\'" | '
-                    'Select-Object ProcessId, CommandLine | '
-                    'Where-Object { $_.CommandLine -match \'%s\' } | '
+                    "Get-WmiObject Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | "
+                    "Select-Object ProcessId, CommandLine | "
+                    "Where-Object { $_.CommandLine -match '%s' } | "
                     'ForEach-Object { "$($_.ProcessId)" }'
                 ) % monitor_name
                 if _is_wsl():
                     result = subprocess.run(
                         ["powershell.exe", "-Command", ps_cmd],
-                        capture_output=True, text=True, timeout=10
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                 else:
                     result = subprocess.run(
                         ["powershell", "-Command", ps_cmd],
-                        capture_output=True, text=True, timeout=10
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                 pid_str = result.stdout.strip()
                 if pid_str:
@@ -340,8 +372,12 @@ start "" /B "{py_path_clean}" "{win_target}"
         }
 
 
-def _monitor_script_content(client_id: str, state_file: str, profile: str = "main") -> str:
-    mirror_name = "apollo_presence.json" if profile == "apollo" else "hermes_presence.json"
+def _monitor_script_content(
+    client_id: str, state_file: str, profile: str = "main"
+) -> str:
+    mirror_name = (
+        "apollo_presence.json" if profile == "apollo" else "hermes_presence.json"
+    )
     return f'''"""
 Hermes Presence Monitor v3.1.0 — Windows auto-start script (all-pipe).
 Profile: {profile}
@@ -671,7 +707,7 @@ while True:
 
 
 def _task_scheduler_xml(task_name: str, python_path: str, script_path: str) -> str:
-    return f'''<?xml version="1.0" encoding="UTF-16"?>
+    return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Hermes Presence — Discord Rich Presence Monitor</Description>
@@ -699,4 +735,4 @@ def _task_scheduler_xml(task_name: str, python_path: str, script_path: str) -> s
       <Arguments>{script_path}</Arguments>
     </Exec>
   </Actions>
-</Task>'''
+</Task>"""

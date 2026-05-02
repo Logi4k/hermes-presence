@@ -58,8 +58,12 @@ class PresenceLogger:
 
     # Convenience methods matching monitor lifecycle
     def startup(self, client_id: str, platform: str, state_file: Path):
-        self.event("startup", client_id=client_id[:8] + "...", platform=platform,
-                    state_file=str(state_file))
+        self.event(
+            "startup",
+            client_id=client_id[:8] + "...",
+            platform=platform,
+            state_file=str(state_file),
+        )
 
     def connected(self, pipe_num: int, total_pipes: int):
         self.event("connected", pipe=pipe_num, total_pipes=total_pipes)

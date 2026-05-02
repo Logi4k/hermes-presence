@@ -10,19 +10,17 @@ Thread-safe: uses atomic writes (write to temp + rename).
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .tool_icons import TOOL_ICONS
 
 DEFAULT_STATE_FILE = Path.home() / ".hermes" / "state" / "presence.json"
 
 # Mapping of tool names to presence display details
-from .tool_icons import TOOL_ICONS
 
 
 class PresenceWriter:
@@ -55,6 +53,7 @@ class PresenceWriter:
         self._profile: str = "main"
         self._tool_started_at: Optional[str] = None
         self._error_msg: Optional[str] = None
+        self._subagent_tasks: list[str] = []
 
     def _mirror_to_windows(self):
         """Mirror state file to Windows AppData if running under WSL."""
@@ -153,6 +152,12 @@ class PresenceWriter:
             try:
                 if params.get("tasks"):
                     task_count = len(params["tasks"])
+                    task_goals = [
+                        t.get("goal", "")[:60]
+                        for t in params["tasks"]
+                        if isinstance(t, dict)
+                    ]
+                    self._subagent_tasks = task_goals
                     detail = f"Spawning {task_count} sub-agent(s)"
                     self._subagent_count += task_count
                 else:
@@ -200,6 +205,8 @@ class PresenceWriter:
     def set_subagent_count(self, count: int):
         """Set subagent count directly (for sync from orchestrator)."""
         self._subagent_count = max(0, count)
+        if self._subagent_count == 0:
+            self._subagent_tasks = []
 
     def set_kanban(self, phase: Optional[str]):
         """Set current kanban phase (or None to clear)."""
@@ -222,6 +229,8 @@ class PresenceWriter:
         # If sub-agents are active, show orchestrating state instead of idle
         if self._subagent_count > 0:
             sub_detail = f"Monitoring {self._subagent_count} sub-agent(s)"
+            if self._subagent_tasks:
+                sub_detail = f"Monitoring {self._subagent_count} sub-agent(s): {self._subagent_tasks[0]}"
             self._write_state(
                 state="orchestrating",
                 tool=None,
@@ -238,7 +247,9 @@ class PresenceWriter:
 
     def session_summary(self):
         """Write a rich session-end summary with stats before shutting down."""
-        session_seconds = int((datetime.now(timezone.utc) - self._session_start).total_seconds())
+        session_seconds = int(
+            (datetime.now(timezone.utc) - self._session_start).total_seconds()
+        )
         minutes, seconds = divmod(session_seconds, 60)
         duration_str = f"{minutes}m {seconds}s"
 
@@ -271,11 +282,18 @@ class PresenceWriter:
             large_image="status_standby",
         )
 
-    def _write_state(self, state: str, tool: Optional[str] = None,
-                     detail: str = "", large_image: str = "status_idle"):
+    def _write_state(
+        self,
+        state: str,
+        tool: Optional[str] = None,
+        detail: str = "",
+        large_image: str = "status_idle",
+    ):
         """Atomic write to state file."""
 
-        session_seconds = int((datetime.now(timezone.utc) - self._session_start).total_seconds())
+        session_seconds = int(
+            (datetime.now(timezone.utc) - self._session_start).total_seconds()
+        )
 
         data = {
             "version": 3,
@@ -334,11 +352,14 @@ class PresenceWriter:
 
 # --- WSL to Windows mirror (module-level utility) ---
 
+
 def _is_wsl() -> bool:
     """Detect if running under WSL (requires both kernel marker and Windows mount)."""
     try:
         content = Path("/proc/version").read_text().lower()
-        return ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists()
+        return ("microsoft" in content or "wsl" in content) and Path(
+            "/mnt/c/Windows"
+        ).exists()
     except Exception:
         return False
 
@@ -347,8 +368,15 @@ def _get_windows_username() -> str:
     """Get Windows username from WSL, handling Unicode correctly."""
     try:
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", "[System.Environment]::UserName"],
-            capture_output=True, text=True, timeout=5,
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                "[System.Environment]::UserName",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -378,6 +406,7 @@ def _get_windows_username() -> str:
 # Singleton instance for the hook module
 # Singleton instances for the hook module (keyed by state_file path)
 _writers: dict[str, PresenceWriter] = {}
+
 
 def get_writer(state_file: Optional[Path] = None) -> PresenceWriter:
     """Get or create the PresenceWriter for the given state file."""

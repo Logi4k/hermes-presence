@@ -5,7 +5,6 @@ Creates: ~/.config/systemd/user/hermes-presence.service
 Enables: systemctl --user enable hermes-presence
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -49,7 +48,9 @@ class LinuxLauncher(PlatformLauncher):
 
     @property
     def _unit_path(self) -> Path:
-        return Path.home() / ".config" / "systemd" / "user" / f"{self._unit_name}.service"
+        return (
+            Path.home() / ".config" / "systemd" / "user" / f"{self._unit_name}.service"
+        )
 
     def _python_path(self) -> str:
         """Find the Python interpreter to use."""
@@ -82,15 +83,18 @@ class LinuxLauncher(PlatformLauncher):
         try:
             subprocess.run(
                 ["systemctl", "--user", "daemon-reload"],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
             subprocess.run(
                 ["systemctl", "--user", "enable", self._unit_name],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
             subprocess.run(
                 ["systemctl", "--user", "start", self._unit_name],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
             return True
         except Exception:
@@ -100,11 +104,13 @@ class LinuxLauncher(PlatformLauncher):
         try:
             subprocess.run(
                 ["systemctl", "--user", "stop", self._unit_name],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
             subprocess.run(
                 ["systemctl", "--user", "disable", self._unit_name],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
         except Exception:
             pass
@@ -114,7 +120,8 @@ class LinuxLauncher(PlatformLauncher):
         try:
             subprocess.run(
                 ["systemctl", "--user", "daemon-reload"],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
         except Exception:
             pass
@@ -128,7 +135,8 @@ class LinuxLauncher(PlatformLauncher):
         try:
             result = subprocess.run(
                 ["systemctl", "--user", "start", self._unit_name],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
             return result.returncode == 0
         except Exception:
@@ -138,7 +146,8 @@ class LinuxLauncher(PlatformLauncher):
         try:
             result = subprocess.run(
                 ["systemctl", "--user", "stop", self._unit_name],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
             return result.returncode == 0
         except Exception:
@@ -150,14 +159,18 @@ class LinuxLauncher(PlatformLauncher):
         try:
             result = subprocess.run(
                 ["systemctl", "--user", "is-active", self._unit_name],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             running = result.stdout.strip() == "active"
 
             if running:
                 prop = subprocess.run(
                     ["systemctl", "--user", "show", self._unit_name, "-p", "MainPID"],
-                    capture_output=True, text=True, timeout=5
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 for line in prop.stdout.splitlines():
                     if line.startswith("MainPID="):

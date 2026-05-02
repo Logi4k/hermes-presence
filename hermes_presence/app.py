@@ -17,7 +17,6 @@ Environment variables:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -31,7 +30,7 @@ def _cmd_install(args):
         force=args.force,
         no_start=args.no_start,
         profile=args.profile,
-        dry_run=getattr(args, 'dry_run', False),
+        dry_run=getattr(args, "dry_run", False),
     )
 
     if success:
@@ -50,7 +49,7 @@ def _cmd_uninstall(args):
     """Remove hermes-presence."""
     from .installer import uninstall
 
-    profile = getattr(args, 'profile', 'main')
+    profile = getattr(args, "profile", "main")
     success = uninstall(profile=profile)
     if success:
         print("\n[DONE] Hermes Presence removed.")
@@ -81,17 +80,21 @@ def _cmd_status(args):
 
     # Platform-specific status
     from .installer import _detect_platform
+
     platform = _detect_platform()
 
     try:
         if platform == "linux":
             from .platforms.linux import LinuxLauncher
+
             launcher = LinuxLauncher(cfg.discord.client_id, state_file)
         elif platform == "macos":
             from .platforms.macos import MacOSLauncher
+
             launcher = MacOSLauncher(cfg.discord.client_id, state_file)
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
+
             launcher = WindowsLauncher(cfg.discord.client_id, state_file)
         else:
             launcher = None
@@ -102,7 +105,7 @@ def _cmd_status(args):
             print("-" * 40)
             print(f"  Running:     {'Yes' if s.get('running') else 'No'}")
             print(f"  Auto-start:  {'Yes' if s.get('auto_start') else 'No'}")
-            if s.get('pid'):
+            if s.get("pid"):
                 print(f"  PID:         {s['pid']}")
             print()
     except ImportError:
@@ -168,7 +171,9 @@ def _cmd_config(args):
         # Show config
         cfg = load_config()
         print("Current configuration:")
-        print(f"  discord.client_id     = {'[SET]' if cfg.discord.client_id else '(not set)'}")
+        print(
+            f"  discord.client_id     = {'[SET]' if cfg.discord.client_id else '(not set)'}"
+        )
         print(f"  display.show_model    = {cfg.display.show_model}")
         print(f"  display.show_provider = {cfg.display.show_provider}")
         print(f"  display.idle_timeout  = {cfg.display.idle_timeout}s")
@@ -206,7 +211,9 @@ def _cmd_config(args):
     # Navigate the dotted key path
     parts = key.split(".")
     if len(parts) < 2:
-        print(f"ERROR: Config keys must be in format 'section.key' (e.g. 'discord.client_id')")
+        print(
+            "ERROR: Config keys must be in format 'section.key' (e.g. 'discord.client_id')"
+        )
         sys.exit(1)
 
     section, field = parts[0], parts[1]
@@ -214,8 +221,14 @@ def _cmd_config(args):
     # Convert value to appropriate type
     if field in ("exclude", "custom_urls"):
         value = value.split(",") if value else []
-    elif field in ("show_model", "show_provider", "force_windows_ipc",
-                   "state_file_mirror", "hermes_github", "nexus_dashboard"):
+    elif field in (
+        "show_model",
+        "show_provider",
+        "force_windows_ipc",
+        "state_file_mirror",
+        "hermes_github",
+        "nexus_dashboard",
+    ):
         value = value.lower() in ("true", "yes", "1", "on")
     elif field in ("idle_timeout", "poll_interval", "pipe_connect_retry"):
         value = int(value)
@@ -257,9 +270,9 @@ def _cmd_run(args):
         sys.exit(1)
 
     # Set up logging
-    log_path = getattr(args, 'log_file', None) or cfg.advanced.log_file or None
+    log_path = getattr(args, "log_file", None) or cfg.advanced.log_file or None
     log = get_logger(Path(log_path) if log_path else None)
-    profile = getattr(args, 'profile', 'main')
+    profile = getattr(args, "profile", "main")
 
     monitor = UnifiedMonitor(
         client_id=cfg.discord.client_id,
@@ -302,7 +315,6 @@ def _cmd_version(args):
 def _cmd_validate(args):
     """Validate the installation."""
     from .config import load_config, get_state_file_path
-    from pathlib import Path
 
     print("Validating Hermes Presence Installation")
     print("=" * 50)
@@ -326,14 +338,19 @@ def _cmd_validate(args):
 
     # Check 3: pypresence installed
     try:
-        import pypresence
-        print(f"  [PASS] pypresence is installed")
-    except ImportError:
+        from importlib.util import find_spec
+
+        if find_spec("pypresence"):
+            print("  [PASS] pypresence is installed")
+        else:
+            raise ImportError
+    except (ImportError, ModuleNotFoundError):
         print("  [FAIL] pypresence is not installed (pip install pypresence)")
 
     # Check 4: Discord reachable
     try:
         from pypresence import Presence, DiscordNotFound
+
         rpc = Presence("0" * 18, pipe=0)
         rpc.connect()
         rpc.close()
@@ -346,9 +363,12 @@ def _cmd_validate(args):
     # Check 5: powershell.exe on WSL/Windows
     try:
         import subprocess
+
         result = subprocess.run(
             ["powershell.exe", "-Command", "echo ok"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             print("  [PASS] powershell.exe is available")
@@ -375,15 +395,25 @@ def main():
     p_install = subparsers.add_parser("install", help="Full one-command setup")
     p_install.add_argument("--client-id", help="Discord Application Client ID")
     p_install.add_argument("--force", action="store_true", help="Force reinstall")
-    p_install.add_argument("--no-start", action="store_true", help="Don't start immediately")
-    p_install.add_argument("--profile", default="main",
-                           help="Profile to install for (main, apollo, or any custom profile)")
-    p_install.add_argument("--dry-run", action="store_true", help="Show what would be installed without installing")
+    p_install.add_argument(
+        "--no-start", action="store_true", help="Don't start immediately"
+    )
+    p_install.add_argument(
+        "--profile",
+        default="main",
+        help="Profile to install for (main, apollo, or any custom profile)",
+    )
+    p_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be installed without installing",
+    )
 
     # uninstall
     p_uninstall = subparsers.add_parser("uninstall", help="Remove hermes-presence")
-    p_uninstall.add_argument("--profile", default="main",
-                            help="Profile to uninstall (default: main)")
+    p_uninstall.add_argument(
+        "--profile", default="main", help="Profile to uninstall (default: main)"
+    )
 
     # status
     subparsers.add_parser("status", help="Show current status")
@@ -394,14 +424,20 @@ def main():
 
     # config
     p_config = subparsers.add_parser("config", help="Show or update configuration")
-    p_config.add_argument("args", nargs="*", help="[set] <key> <value> | <key> <value> | 'show'")
+    p_config.add_argument(
+        "args", nargs="*", help="[set] <key> <value> | <key> <value> | 'show'"
+    )
 
     # run
     p_run = subparsers.add_parser("run", help="Run monitor in foreground (debug)")
-    p_run.add_argument("--profile", default="main",
-                       help="Profile to monitor (main, apollo, or any custom profile)")
-    p_run.add_argument("--log-file", default=None,
-                       help="Path to write JSON-lines log output")
+    p_run.add_argument(
+        "--profile",
+        default="main",
+        help="Profile to monitor (main, apollo, or any custom profile)",
+    )
+    p_run.add_argument(
+        "--log-file", default=None, help="Path to write JSON-lines log output"
+    )
 
     # version
     parser.add_argument("--version", action="version", version="hermes-presence v3.1.0")

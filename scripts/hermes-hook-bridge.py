@@ -31,8 +31,8 @@ _package_root = Path(__file__).resolve().parent.parent
 if str(_package_root) not in sys.path:
     sys.path.insert(0, str(_package_root))
 
-from hermes_presence.config import is_disabled, get_state_file_path, load_config
-from hermes_presence.writer import get_writer
+from hermes_presence.config import is_disabled, get_state_file_path  # noqa: E402
+from hermes_presence.writer import get_writer  # noqa: E402
 
 # Profile detection
 _PROFILE = os.environ.get("HERMES_PROFILE", "main")
@@ -77,8 +77,6 @@ def handle_pre_llm_call(payload: dict, writer):
     is_first_turn = payload.get("is_first_turn", False)
     model = payload.get("model", os.environ.get("HERMES_MODEL", "unknown"))
     provider = payload.get("provider", os.environ.get("HERMES_PROVIDER", "unknown"))
-    # Platform from payload or env
-    platform = payload.get("platform", "")
 
     if is_first_turn:
         writer.set_session(
@@ -128,15 +126,10 @@ def handle_on_session_end(payload: dict, writer):
 
 def handle_subagent_stop(payload: dict, writer):
     """Subagent completed — decrement subagent count."""
-    child_status = payload.get("child_status", "completed")
-    child_role = payload.get("child_role", "leaf")
-    # Approximate: decrement by 1 for each stopped subagent
-    # (batch tasks report as a single stop with task count in the payload)
     task_count = payload.get("task_count", 1)
     current = writer._subagent_count
     if current > 0:
         writer.set_subagent_count(max(0, current - task_count))
-    # If all sub-agents done, return to idle
     if writer._subagent_count <= 0:
         writer.idle()
 

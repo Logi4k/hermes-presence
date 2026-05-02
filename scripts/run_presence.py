@@ -1,4 +1,8 @@
-import json, os, sys, time, signal
+import json
+import os
+import sys
+import time
+import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from pypresence import Presence, DiscordNotFound, PipeClosed
@@ -10,32 +14,37 @@ STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence.json"
 PIPES = [0, 1, 2, 3]
 
 ACTIVITY_MAP = {
-    "starting":   ("Launching Hermes", "Starting session..."),
-    "thinking":   ("Thinking", "Processing..."),
-    "working":    ("Working", None),
-    "idle":       ("Idle", "Waiting for input"),
-    "error":      ("Error", None),
-    "offline":    ("Offline", "Session ended"),
+    "starting":       ("Launching Hermes", "Starting session..."),
+    "thinking":       ("Thinking", "Processing..."),
+    "typing":         ("Preparing", "About to respond..."),
+    "working":        ("Working", None),
+    "reading":        ("Reading", None),
+    "idle":           ("Idle", "Waiting for input"),
+    "error":          ("Error", None),
+    "offline":        ("Offline", "Session ended"),
+    "orchestrating":  ("Orchestrating", None),
+    "cron_job":       ("Cron Job", None),
+    "session_ended":  ("Session Ended", None),
 }
 
 # Tool → small_image icon mapping (overrides state-based icon)
 TOOL_ICON_MAP = {
-    "terminal":        "status_active",       # Console/terminal
-    "web_search":      "status_researching",  # Magnifying glass
-    "web_extract":     "status_researching",  # Reading web
+    "terminal": "status_active",  # Console/terminal
+    "web_search": "status_researching",  # Magnifying glass
+    "web_extract": "status_researching",  # Reading web
     "browser_navigate": "status_monitoring",  # Globe/browser
-    "browser_click":   "status_monitoring",
-    "browser_type":    "status_monitoring",
-    "browser_snapshot":"status_monitoring",
-    "read_file":       "status_researching",  # Reading
-    "write_file":      "status_working",      # Writing
-    "patch":           "status_working",      # Editing
-    "execute_code":    "status_active",       # Code running
-    "delegate_task":   "status_monitoring",   # Delegation
-    "delegate_tasks":  "status_monitoring",
-    "send_message":    "status_active",       # Outbound comms
-    "memory":          "status_standby",      # Background task
-    "skill_view":      "status_researching",  # Loading reference
+    "browser_click": "status_monitoring",
+    "browser_type": "status_monitoring",
+    "browser_snapshot": "status_monitoring",
+    "read_file": "status_researching",  # Reading
+    "write_file": "status_working",  # Writing
+    "patch": "status_working",  # Editing
+    "execute_code": "status_active",  # Code running
+    "delegate_task": "status_monitoring",  # Delegation
+    "delegate_tasks": "status_monitoring",
+    "send_message": "status_active",  # Outbound comms
+    "memory": "status_standby",  # Background task
+    "skill_view": "status_researching",  # Loading reference
 }
 
 print(f"STATE_FILE: {STATE_FILE}", flush=True)
@@ -43,6 +52,7 @@ print(f"STATE_FILE: {STATE_FILE}", flush=True)
 # connections[pipe_num] = Presence instance
 connections: dict[int, Presence] = {}
 last_hash = ""
+
 
 def connect_all():
     """Connect to every available Discord pipe simultaneously."""
@@ -63,6 +73,7 @@ def connect_all():
 
     return len(connections) > 0
 
+
 def disconnect_all():
     """Clear and close all connections."""
     global connections
@@ -74,7 +85,10 @@ def disconnect_all():
             pass
     connections.clear()
 
-def update_all(state_text, details, small_img, small_text, start_ts, buttons, party_size=None):
+
+def update_all(
+    state_text, details, small_img, small_text, start_ts, buttons, party_size=None
+):
     """Push the same presence to every connected pipe."""
     dead = []
     for pipe_num, rpc in connections.items():
@@ -106,17 +120,20 @@ def update_all(state_text, details, small_img, small_text, start_ts, buttons, pa
             pass
         del connections[pipe_num]
 
+
 def shutdown(*args):
     disconnect_all()
     print("[END]", flush=True)
     sys.exit(0)
 
+
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
 
+
 def _resolve_small_icon(tool_name, state_name):
     """Pick the best small_image icon for the current context.
-    
+
     Priority: tool-specific icon > state-based icon > None.
     """
     if tool_name:
@@ -134,6 +151,7 @@ def _resolve_small_icon(tool_name, state_name):
         return f"status_{state_name}"
 
     return None
+
 
 def _format_model_label(model, provider):
     """Build a compact model label from session info."""
@@ -156,7 +174,10 @@ def _format_model_label(model, provider):
         return provider.capitalize()
     return ""
 
-print("[start] Multi-pipe monitor v2 (model + tool icons + subagents + timer)", flush=True)
+
+print(
+    "[start] Multi-pipe monitor v2 (model + tool icons + subagents + timer)", flush=True
+)
 
 while True:
     # Connect to any new pipes
@@ -200,14 +221,19 @@ while True:
             if tool_started_at:
                 start_ts = int(datetime.fromisoformat(tool_started_at).timestamp())
             else:
-                start_ts = int(datetime.fromisoformat(
-                    sess.get("started_at", datetime.now(timezone.utc).isoformat())
-                ).timestamp())
+                start_ts = int(
+                    datetime.fromisoformat(
+                        sess.get("started_at", datetime.now(timezone.utc).isoformat())
+                    ).timestamp()
+                )
 
-            new_hash = f"{state_text}|{details}|{tool}|{sess.get('tool_calls_count',0)}|{subagent_count}|{tool_started_at}"
+            new_hash = f"{state_text}|{details}|{tool}|{sess.get('tool_calls_count', 0)}|{subagent_count}|{tool_started_at}"
             if new_hash != last_hash:
                 buttons = [
-                    {"label": "Hermes Agent", "url": "https://github.com/NousResearch/hermes-agent"},
+                    {
+                        "label": "Hermes Agent",
+                        "url": "https://github.com/NousResearch/hermes-agent",
+                    },
                 ]
                 # Add second button for Nexus Dashboard when available
                 # buttons.append({"label": "Nexus Dashboard", "url": "http://localhost:5173"})
@@ -217,7 +243,15 @@ while True:
                 if subagent_count > 0:
                     party = subagent_count + 1  # Hermes + sub-agents
 
-                update_all(state_text, details, small_img, small_text, start_ts, buttons, party_size=party)
+                update_all(
+                    state_text,
+                    details,
+                    small_img,
+                    small_text,
+                    start_ts,
+                    buttons,
+                    party_size=party,
+                )
                 last_hash = new_hash
                 pipe_list = ",".join(str(p) for p in connections)
                 extras = []
@@ -226,7 +260,10 @@ while True:
                 if tool:
                     extras.append(f"icon={small_img}")
                 extra_str = f" ({', '.join(extras)})" if extras else ""
-                print(f"[update → pipes {pipe_list}] {state_text}: {details}{extra_str}", flush=True)
+                print(
+                    f"[update → pipes {pipe_list}] {state_text}: {details}{extra_str}",
+                    flush=True,
+                )
         else:
             if last_hash:
                 disconnect_all()

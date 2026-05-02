@@ -11,6 +11,7 @@ CLI commands read/write the config file via Config.save().
 
 import os
 import sys
+
 try:
     import tomllib
 except ImportError:
@@ -219,7 +220,9 @@ def _write_toml(d: dict, path: Path):
                         items.append(f'"{escaped}"')
                     elif isinstance(item, dict):
                         inner = ", ".join(
-                            f'{ik} = {iv}' if not isinstance(iv, str) else f'{ik} = "{iv}"'
+                            f"{ik} = {iv}"
+                            if not isinstance(iv, str)
+                            else f'{ik} = "{iv}"'
                             for ik, iv in item.items()
                         )
                         items.append(f"{{ {inner} }}")
@@ -228,7 +231,7 @@ def _write_toml(d: dict, path: Path):
                 lines.append(f"{k} = [{', '.join(items)}]")
             elif isinstance(v, dict):
                 inner = ", ".join(
-                    f'{ik} = "{iv}"' if isinstance(iv, str) else f'{ik} = {iv}'
+                    f'{ik} = "{iv}"' if isinstance(iv, str) else f"{ik} = {iv}"
                     for ik, iv in v.items()
                 )
                 lines.append(f"{{ {inner} }}")
@@ -356,7 +359,10 @@ def verify_config(config_path: Optional[Path] = None) -> bool:
 
     # client_id must be non-empty
     if not config.discord.client_id:
-        print("[WARN] discord.client_id is empty — set a Discord application client ID", file=sys.stderr)
+        print(
+            "[WARN] discord.client_id is empty — set a Discord application client ID",
+            file=sys.stderr,
+        )
         ok = False
 
     # state_file_path must exist or its parent dir must be writable
@@ -365,9 +371,15 @@ def verify_config(config_path: Optional[Path] = None) -> bool:
         parent = state_file_path.parent
         if not parent.exists():
             if os.access(os.getcwd(), os.W_OK):
-                print(f"[WARN] State file directory {parent} does not exist; it will be created on first run", file=sys.stderr)
+                print(
+                    f"[WARN] State file directory {parent} does not exist; it will be created on first run",
+                    file=sys.stderr,
+                )
         elif not os.access(parent, os.W_OK):
-            print(f"[WARN] State file parent directory {parent} is not writable", file=sys.stderr)
+            print(
+                f"[WARN] State file parent directory {parent} is not writable",
+                file=sys.stderr,
+            )
             ok = False
 
     # poll_interval must be > 0

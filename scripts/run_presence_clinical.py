@@ -12,7 +12,11 @@ Usage:
     pythonw run_presence_clinical.py
 """
 
-import json, os, sys, time, signal
+import json
+import os
+import sys
+import time
+import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from pypresence import Presence, DiscordNotFound, PipeClosed
@@ -28,31 +32,36 @@ STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence_clinical.jso
 PIPES = [0, 1, 2, 3]
 
 ACTIVITY_MAP = {
-    "starting":   ("Launching Hermes", "Clinical Monitor starting..."),
-    "thinking":   ("Thinking", "Processing clinical data..."),
-    "working":    ("Working", None),
-    "idle":       ("Idle", "Waiting for input"),
-    "error":      ("Error", None),
-    "offline":    ("Offline", "Session ended"),
+    "starting":       ("Launching Hermes", "Clinical Monitor starting..."),
+    "thinking":       ("Thinking", "Processing clinical data..."),
+    "typing":         ("Preparing", "About to respond..."),
+    "working":        ("Working", None),
+    "reading":        ("Reading", None),
+    "idle":           ("Idle", "Waiting for input"),
+    "error":          ("Error", None),
+    "offline":        ("Offline", "Session ended"),
+    "orchestrating":  ("Orchestrating", None),
+    "cron_job":       ("Cron Job", None),
+    "session_ended":  ("Session Ended", None),
 }
 
 TOOL_ICON_MAP = {
-    "terminal":        "status_active",
-    "web_search":      "status_researching",
-    "web_extract":     "status_researching",
+    "terminal": "status_active",
+    "web_search": "status_researching",
+    "web_extract": "status_researching",
     "browser_navigate": "status_monitoring",
-    "browser_click":   "status_monitoring",
-    "browser_type":    "status_monitoring",
-    "browser_snapshot":"status_monitoring",
-    "read_file":       "status_researching",
-    "write_file":      "status_working",
-    "patch":           "status_working",
-    "execute_code":    "status_active",
-    "delegate_task":   "status_monitoring",
-    "delegate_tasks":  "status_monitoring",
-    "send_message":    "status_active",
-    "memory":          "status_standby",
-    "skill_view":      "status_researching",
+    "browser_click": "status_monitoring",
+    "browser_type": "status_monitoring",
+    "browser_snapshot": "status_monitoring",
+    "read_file": "status_researching",
+    "write_file": "status_working",
+    "patch": "status_working",
+    "execute_code": "status_active",
+    "delegate_task": "status_monitoring",
+    "delegate_tasks": "status_monitoring",
+    "send_message": "status_active",
+    "memory": "status_standby",
+    "skill_view": "status_researching",
 }
 
 print(f"STATE_FILE: {STATE_FILE}", flush=True)
@@ -60,6 +69,7 @@ print(f"CLIENT_ID: {CLIENT_ID}", flush=True)
 
 connections: dict[int, Presence] = {}
 last_hash = ""
+
 
 def connect_all():
     global connections
@@ -78,6 +88,7 @@ def connect_all():
             continue
     return len(connections) > 0
 
+
 def disconnect_all():
     global connections
     for pipe_num, rpc in list(connections.items()):
@@ -88,7 +99,10 @@ def disconnect_all():
             pass
     connections.clear()
 
-def update_all(state_text, details, small_img, small_text, start_ts, buttons, party_size=None):
+
+def update_all(
+    state_text, details, small_img, small_text, start_ts, buttons, party_size=None
+):
     dead = []
     for pipe_num, rpc in connections.items():
         try:
@@ -117,13 +131,16 @@ def update_all(state_text, details, small_img, small_text, start_ts, buttons, pa
             pass
         del connections[pipe_num]
 
+
 def shutdown(*args):
     disconnect_all()
     print("[END]", flush=True)
     sys.exit(0)
 
+
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
+
 
 def _resolve_small_icon(tool_name, state_name):
     if tool_name:
@@ -136,6 +153,7 @@ def _resolve_small_icon(tool_name, state_name):
     if state_name in ("working", "idle", "error"):
         return f"status_{state_name}"
     return None
+
 
 def _format_model_label(model, provider):
     if model:
@@ -156,7 +174,11 @@ def _format_model_label(model, provider):
         return provider.capitalize()
     return ""
 
-print("[start] Clinical Monitor v2 (multi-pipe, model + tool icons + subagents + timer)", flush=True)
+
+print(
+    "[start] Clinical Monitor v2 (multi-pipe, model + tool icons + subagents + timer)",
+    flush=True,
+)
 
 while True:
     connect_all()
@@ -194,20 +216,33 @@ while True:
             if tool_started_at:
                 start_ts = int(datetime.fromisoformat(tool_started_at).timestamp())
             else:
-                start_ts = int(datetime.fromisoformat(
-                    sess.get("started_at", datetime.now(timezone.utc).isoformat())
-                ).timestamp())
+                start_ts = int(
+                    datetime.fromisoformat(
+                        sess.get("started_at", datetime.now(timezone.utc).isoformat())
+                    ).timestamp()
+                )
 
-            new_hash = f"{state_text}|{details}|{tool}|{sess.get('tool_calls_count',0)}|{subagent_count}|{tool_started_at}"
+            new_hash = f"{state_text}|{details}|{tool}|{sess.get('tool_calls_count', 0)}|{subagent_count}|{tool_started_at}"
             if new_hash != last_hash:
                 buttons = [
-                    {"label": "Hermes Agent", "url": "https://github.com/NousResearch/hermes-agent"},
+                    {
+                        "label": "Hermes Agent",
+                        "url": "https://github.com/NousResearch/hermes-agent",
+                    },
                 ]
                 party = None
                 if subagent_count > 0:
                     party = subagent_count + 1
 
-                update_all(state_text, details, small_img, small_text, start_ts, buttons, party_size=party)
+                update_all(
+                    state_text,
+                    details,
+                    small_img,
+                    small_text,
+                    start_ts,
+                    buttons,
+                    party_size=party,
+                )
                 last_hash = new_hash
                 pipe_list = ",".join(str(p) for p in connections)
                 extras = []
@@ -216,7 +251,10 @@ while True:
                 if tool:
                     extras.append(f"icon={small_img}")
                 extra_str = f" ({', '.join(extras)})" if extras else ""
-                print(f"[update → pipes {pipe_list}] {state_text}: {details}{extra_str}", flush=True)
+                print(
+                    f"[update → pipes {pipe_list}] {state_text}: {details}{extra_str}",
+                    flush=True,
+                )
         else:
             if last_hash:
                 disconnect_all()

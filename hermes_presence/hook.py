@@ -17,16 +17,16 @@ Or manual: add hook to config.yaml
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Optional
 
-from .config import is_disabled, load_config, get_state_file_path
+from .config import is_disabled, get_state_file_path
 from .writer import get_writer
 
 # Check for cron markers
 _IS_CRON = any(
-    os.environ.get(v, "").strip() for v in [
+    os.environ.get(v, "").strip()
+    for v in [
         "HERMES_CRON_JOB_ID",
         "CRON_JOB_ID",
         "HERMES_SCHEDULED",
@@ -253,6 +253,7 @@ def on_shutdown(context: dict):
 
 # --- WSL to Windows Bridge ---
 
+
 def _mirror_to_windows_if_wsl():
     """Mirror state file to Windows side if running on WSL."""
     if not _is_wsl():
@@ -296,7 +297,9 @@ def _is_wsl() -> bool:
     """Detect if running under WSL (requires both kernel marker and Windows mount)."""
     try:
         content = Path("/proc/version").read_text().lower()
-        return ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists()
+        return ("microsoft" in content or "wsl" in content) and Path(
+            "/mnt/c/Windows"
+        ).exists()
     except Exception:
         return False
 
@@ -305,8 +308,15 @@ def _get_windows_username() -> str:
     """Get Windows username from WSL, handling Unicode correctly."""
     try:
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", "[System.Environment]::UserName"],
-            capture_output=True, text=True, timeout=5,
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                "[System.Environment]::UserName",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -331,7 +341,6 @@ def _get_windows_username() -> str:
         pass
 
     return ""
-
 
 
 def _load_hermes_hook():
@@ -376,8 +385,8 @@ def auto_setup(agent=None):
 
     if agent is not None:
         try:
-            model = getattr(agent, 'model', model) or model
-            provider = getattr(agent, 'provider', provider) or provider
+            model = getattr(agent, "model", model) or model
+            provider = getattr(agent, "provider", provider) or provider
         except Exception:
             pass
 
@@ -409,9 +418,9 @@ def register_cli_hooks(writer, callbacks: dict):
     """
     wrapped = {}
 
-    orig_start = callbacks.get('tool_start')
-    orig_complete = callbacks.get('tool_complete')
-    orig_thinking = callbacks.get('thinking')
+    orig_start = callbacks.get("tool_start")
+    orig_complete = callbacks.get("tool_complete")
+    orig_thinking = callbacks.get("thinking")
 
     def _wrapped_tool_start(tool_name, args=None):
         writer.tool_call(tool_name, args)
@@ -432,11 +441,11 @@ def register_cli_hooks(writer, callbacks: dict):
             orig_thinking()
 
     if orig_start:
-        wrapped['tool_start'] = _wrapped_tool_start
+        wrapped["tool_start"] = _wrapped_tool_start
     if orig_complete:
-        wrapped['tool_complete'] = _wrapped_tool_complete
+        wrapped["tool_complete"] = _wrapped_tool_complete
     if orig_thinking:
-        wrapped['thinking'] = _wrapped_thinking
+        wrapped["thinking"] = _wrapped_thinking
 
     return wrapped
 

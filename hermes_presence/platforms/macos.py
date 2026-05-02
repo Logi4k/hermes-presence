@@ -5,7 +5,6 @@ Creates: ~/Library/LaunchAgents/com.hermes.presence.plist
 Loads: launchctl load ~/Library/LaunchAgents/com.hermes.presence.plist
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -105,7 +104,8 @@ class MacOSLauncher(PlatformLauncher):
         try:
             subprocess.run(
                 ["launchctl", "load", str(self._plist_path)],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
             return True
         except Exception:
@@ -115,7 +115,8 @@ class MacOSLauncher(PlatformLauncher):
         try:
             subprocess.run(
                 ["launchctl", "unload", str(self._plist_path)],
-                capture_output=True, timeout=10
+                capture_output=True,
+                timeout=10,
             )
         except Exception:
             pass
@@ -129,8 +130,7 @@ class MacOSLauncher(PlatformLauncher):
     def start(self) -> bool:
         try:
             subprocess.run(
-                ["launchctl", "start", self._label],
-                capture_output=True, timeout=10
+                ["launchctl", "start", self._label], capture_output=True, timeout=10
             )
             return True
         except Exception:
@@ -139,8 +139,7 @@ class MacOSLauncher(PlatformLauncher):
     def stop(self) -> bool:
         try:
             subprocess.run(
-                ["launchctl", "stop", self._label],
-                capture_output=True, timeout=10
+                ["launchctl", "stop", self._label], capture_output=True, timeout=10
             )
             return True
         except Exception:
@@ -152,7 +151,9 @@ class MacOSLauncher(PlatformLauncher):
         try:
             result = subprocess.run(
                 ["launchctl", "list", self._label],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             # Output: {"PID" = 12345; ...} or "Could not find service"
             for line in result.stdout.splitlines():

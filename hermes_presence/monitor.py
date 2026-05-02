@@ -23,7 +23,6 @@ Features:
 """
 
 import json
-import os
 import signal
 import sys
 import time
@@ -33,24 +32,26 @@ from typing import Optional
 
 try:
     from pypresence import Presence, DiscordNotFound, PipeClosed
+
     PYPRESENCE_AVAILABLE = True
 except ImportError:
     PYPRESENCE_AVAILABLE = False
+
+from .tool_icons import TOOL_ICON_MAP
 
 # ---- Constants ----
 
 PIPES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 ACTIVITY_MAP = {
-    "starting":   ("Launching Hermes", "Starting session..."),
-    "thinking":   ("Thinking", "Processing..."),
-    "working":    ("Working", None),
-    "idle":       ("Idle", "Waiting for input"),
-    "error":      ("Error", None),
-    "offline":    ("Offline", "Session ended"),
+    "starting": ("Launching Hermes", "Starting session..."),
+    "thinking": ("Thinking", "Processing..."),
+    "error": ("Error", None),
+    "offline": ("Offline", "Session ended"),
+    "orchestrating": ("Orchestrating", None),
+    "cron_job": ("Cron Job", None),
+    "session_ended": ("Session Ended", None),
 }
-
-from .tool_icons import TOOL_ICON_MAP
 
 
 def _detect_platform() -> str:
@@ -63,7 +64,9 @@ def _detect_platform() -> str:
     try:
         with open("/proc/version") as f:
             content = f.read().lower()
-            if ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists():
+            if ("microsoft" in content or "wsl" in content) and Path(
+                "/mnt/c/Windows"
+            ).exists():
                 return "wsl2"
     except Exception:
         pass
@@ -73,18 +76,20 @@ def _detect_platform() -> str:
 def _is_discord_running() -> bool:
     """Check if any Discord process appears to be running."""
     import subprocess
+
     try:
         platform = _detect_platform()
         if platform == "windows":
             result = subprocess.run(
                 ["tasklist", "/FI", "IMAGENAME eq Discord.exe"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             return "Discord.exe" in result.stdout
         else:
             result = subprocess.run(
-                ["pgrep", "-x", "Discord"],
-                capture_output=True, timeout=5
+                ["pgrep", "-x", "Discord"], capture_output=True, timeout=5
             )
             return result.returncode == 0
     except Exception:
@@ -178,7 +183,7 @@ class UnifiedMonitor:
         show_hermes_button: bool = True,
         show_nexus_button: bool = False,
         custom_buttons: Optional[list[dict]] = None,
-        logger = None,
+        logger=None,
     ):
         if not PYPRESENCE_AVAILABLE:
             raise RuntimeError(
@@ -287,10 +292,13 @@ class UnifiedMonitor:
             del self.connections[pipe_num]
 
         if dead and self.logger:
-            self.logger.log_event("pipe_disconnect", {
-                "dead_pipes": dead,
-                "remaining_pipes": list(self.connections.keys()),
-            })
+            self.logger.log_event(
+                "pipe_disconnect",
+                {
+                    "dead_pipes": dead,
+                    "remaining_pipes": list(self.connections.keys()),
+                },
+            )
 
     # ---- Shutdown ----
 
@@ -303,20 +311,26 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print(f"[start] Hermes Presence Monitor v3.1.0", flush=True)
+        print("[start] Hermes Presence Monitor v3.1.0", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
 
         if self.logger:
-            self.logger.log_event("monitor_start", {
-                "platform": self.platform,
-                "state_file": str(self.state_file),
-                "poll_interval": self.poll_interval,
-            })
+            self.logger.log_event(
+                "monitor_start",
+                {
+                    "platform": self.platform,
+                    "state_file": str(self.state_file),
+                    "poll_interval": self.poll_interval,
+                },
+            )
 
         if self.platform == "wsl2":
-            print("[FATAL] WSL2 detected -- Discord IPC does not work under WSL.", flush=True)
+            print(
+                "[FATAL] WSL2 detected -- Discord IPC does not work under WSL.",
+                flush=True,
+            )
             print("[FATAL] Run the monitor on the Windows side instead.", flush=True)
             print("[FATAL] Install: hermes-presence install --wsl2", flush=True)
             if self.logger:
@@ -330,10 +344,13 @@ class UnifiedMonitor:
                 print("[OK] New pipe(s) connected, forcing state push", flush=True)
                 self.last_hash = ""
                 if self.logger:
-                    self.logger.log_event("discord_connect", {
-                        "pipe_count": len(self.connections),
-                        "pipes": list(self.connections.keys()),
-                    })
+                    self.logger.log_event(
+                        "discord_connect",
+                        {
+                            "pipe_count": len(self.connections),
+                            "pipes": list(self.connections.keys()),
+                        },
+                    )
 
             if not self.connections:
                 if not self._disconnected_notified:
@@ -341,12 +358,17 @@ class UnifiedMonitor:
                     self._disconnected_notified = True
 
                     if not _is_discord_running():
-                        print("[wait] Discord does not appear to be running", flush=True)
+                        print(
+                            "[wait] Discord does not appear to be running", flush=True
+                        )
 
                     if self.logger:
-                        self.logger.log_event("discord_disconnect", {
-                            "discord_running": _is_discord_running(),
-                        })
+                        self.logger.log_event(
+                            "discord_disconnect",
+                            {
+                                "discord_running": _is_discord_running(),
+                            },
+                        )
 
                 time.sleep(self.pipe_connect_retry)
                 continue
@@ -418,22 +440,28 @@ class UnifiedMonitor:
         if tool_started_at:
             start_ts = int(datetime.fromisoformat(tool_started_at).timestamp())
         else:
-            start_ts = int(datetime.fromisoformat(
-                sess.get("started_at", datetime.now(timezone.utc).isoformat())
-            ).timestamp())
+            start_ts = int(
+                datetime.fromisoformat(
+                    sess.get("started_at", datetime.now(timezone.utc).isoformat())
+                ).timestamp()
+            )
 
         # ---- Buttons ----
         buttons = []
         if self.show_hermes_button:
-            buttons.append({
-                "label": "Hermes Agent",
-                "url": "https://github.com/NousResearch/hermes-agent",
-            })
+            buttons.append(
+                {
+                    "label": "Hermes Agent",
+                    "url": "https://github.com/NousResearch/hermes-agent",
+                }
+            )
         if self.show_nexus_button:
-            buttons.append({
-                "label": "Nexus Dashboard",
-                "url": "http://localhost:5173",
-            })
+            buttons.append(
+                {
+                    "label": "Nexus Dashboard",
+                    "url": "http://localhost:5173",
+                }
+            )
         for cb in self.custom_buttons:
             if isinstance(cb, dict) and "label" in cb and "url" in cb:
                 if len(buttons) < 2:
@@ -443,7 +471,9 @@ class UnifiedMonitor:
         # Use tool name + state, NOT the precise ISO timestamp
         # (timestamp changes every second, causing unnecessary Discord pushes)
         hash_parts = [
-            state_text, details, tool,
+            state_text,
+            details,
+            tool,
             str(sess.get("tool_calls_count", 0)),
             str(subagent_count),
         ]
@@ -460,8 +490,13 @@ class UnifiedMonitor:
                 party = subagent_count + 1
 
             self.update_all(
-                state_text, details, small_img, small_text,
-                start_ts, buttons, party_size=party,
+                state_text,
+                details,
+                small_img,
+                small_text,
+                start_ts,
+                buttons,
+                party_size=party,
             )
             self.last_hash = new_hash
 
@@ -489,7 +524,10 @@ class UnifiedMonitor:
                 extras.append("orch")
 
             extra_str = f" ({', '.join(extras)})" if extras else ""
-            print(f"[update -> pipes {pipe_list}] {state_text}: {details}{extra_str}", flush=True)
+            print(
+                f"[update -> pipes {pipe_list}] {state_text}: {details}{extra_str}",
+                flush=True,
+            )
 
 
 def create_monitor(

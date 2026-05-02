@@ -4,7 +4,6 @@ One-command installer for hermes-presence.
 Detects platform, sets up auto-start, walks through Discord App ID setup.
 """
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -22,7 +21,9 @@ def _detect_platform() -> str:
     try:
         with open("/proc/version") as f:
             content = f.read().lower()
-            if ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists():
+            if ("microsoft" in content or "wsl" in content) and Path(
+                "/mnt/c/Windows"
+            ).exists():
                 return "wsl2"
     except Exception:
         pass
@@ -69,20 +70,23 @@ def _walk_discord_setup(client_id: Optional[str] = None) -> str:
     # fall back to Path(__file__).parent.parent, then show generic message
     try:
         import importlib.resources
-        assets_path = importlib.resources.files('hermes_presence') / 'assets'
+
+        assets_path = importlib.resources.files("hermes_presence") / "assets"
         if assets_path.is_dir():
             assets_display = str(assets_path)
         else:
             raise FileNotFoundError()
     except Exception:
-        assets_path = Path(__file__).parent.parent / 'assets'
+        assets_path = Path(__file__).parent.parent / "assets"
         if assets_path.is_dir():
             assets_display = str(assets_path)
         else:
             assets_display = "<package assets directory>"
     print(f"  Upload the 8 PNG files from: {assets_display}")
     print("  Name them: hermes_logo, status_active, status_error, status_idle,")
-    print("            status_monitoring, status_researching, status_standby, status_working")
+    print(
+        "            status_monitoring, status_researching, status_standby, status_working"
+    )
     print()
 
     return cid
@@ -96,17 +100,26 @@ def _install_config(client_id: str, config_path: Optional[Path] = None):
     print(f"[OK] Config saved to {config_path or '~/.hermes/presence.toml'}")
 
 
-def _install_platform(platform: str, client_id: str, state_file: Path, no_start: bool = False, profile: str = "main") -> bool:
+def _install_platform(
+    platform: str,
+    client_id: str,
+    state_file: Path,
+    no_start: bool = False,
+    profile: str = "main",
+) -> bool:
     """Set up platform-specific auto-start."""
     try:
         if platform == "linux":
             from .platforms.linux import LinuxLauncher
+
             launcher = LinuxLauncher(client_id, state_file)
         elif platform == "macos":
             from .platforms.macos import MacOSLauncher
+
             launcher = MacOSLauncher(client_id, state_file)
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
+
             launcher = WindowsLauncher(client_id, state_file, profile=profile)
         else:
             print(f"[SKIP] No auto-start mechanism for platform: {platform}")
@@ -136,7 +149,9 @@ def _install_platform(platform: str, client_id: str, state_file: Path, no_start:
         return True
 
     except ImportError as e:
-        print(f"[WARN] Auto-start was not configured: platform module not available ({e})")
+        print(
+            f"[WARN] Auto-start was not configured: platform module not available ({e})"
+        )
         return True
     except Exception as e:
         print(f"[ERROR] Platform setup failed: {e}")
@@ -155,7 +170,10 @@ def install(
 
     Returns True if successful, False on critical failure.
     """
-    print(f"Hermes Presence Installer v3.1.0" + (f" (profile: {profile})" if profile != "main" else ""))
+    print(
+        "Hermes Presence Installer v3.1.0"
+        + (f" (profile: {profile})" if profile != "main" else "")
+    )
     print("=" * 40)
 
     platform = _detect_platform()
@@ -183,7 +201,9 @@ def install(
         print(f"[DRY RUN] Would install platform auto-start for {platform}")
         platform_ok = True
     else:
-        platform_ok = _install_platform(platform, client_id, state_file, no_start=no_start, profile=profile)
+        platform_ok = _install_platform(
+            platform, client_id, state_file, no_start=no_start, profile=profile
+        )
 
     # Step 4: Verify state file directory exists
     if not dry_run:
@@ -209,12 +229,15 @@ def install(
     if not dry_run:
         try:
             from pypresence import Presence
+
             rpc = Presence(0)
             rpc.connect()
             rpc.close()
         except Exception:
             print()
-            print("WARNING: Discord does not appear to be running. Presence won't show until Discord starts.")
+            print(
+                "WARNING: Discord does not appear to be running. Presence won't show until Discord starts."
+            )
 
     return client_id is not None and bool(client_id.strip())
 
@@ -231,12 +254,15 @@ def uninstall(profile: str = "main") -> bool:
     try:
         if platform == "linux":
             from .platforms.linux import LinuxLauncher
+
             launcher = LinuxLauncher("", state_file)
         elif platform == "macos":
             from .platforms.macos import MacOSLauncher
+
             launcher = MacOSLauncher("", state_file)
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
+
             launcher = WindowsLauncher("", state_file, profile=profile)
         else:
             launcher = None
@@ -252,6 +278,7 @@ def uninstall(profile: str = "main") -> bool:
 
     # Remove disabled marker
     from .config import DISABLE_MARKER
+
     DISABLE_MARKER.unlink(missing_ok=True)
 
     print()
