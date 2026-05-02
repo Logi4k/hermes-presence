@@ -30,6 +30,7 @@ def _cmd_install(args):
         client_id=args.client_id,
         force=args.force,
         no_start=args.no_start,
+        profile=args.profile,
     )
 
     if success:
@@ -288,6 +289,8 @@ def main():
     p_install.add_argument("--client-id", help="Discord Application Client ID")
     p_install.add_argument("--force", action="store_true", help="Force reinstall")
     p_install.add_argument("--no-start", action="store_true", help="Don't start immediately")
+    p_install.add_argument("--profile", choices=["main", "apollo"], default="main",
+                           help="Profile to install for (main=Hermes, apollo=clinical-monitor)")
 
     # uninstall
     subparsers.add_parser("uninstall", help="Remove hermes-presence")

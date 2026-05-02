@@ -241,13 +241,51 @@ class PresenceWriter:
         )
 
     def idle(self):
-        """Clear to idle state."""
+        """Clear to idle state. Shows orchestrating if sub-agents are active."""
         self._current_tool = None
         self._tool_started_at = None
+
+        # If sub-agents are active, show orchestrating state instead of idle
+        if self._subagent_count > 0:
+            sub_detail = f"Monitoring {self._subagent_count} sub-agent(s)"
+            self._write_state(
+                state="orchestrating",
+                tool=None,
+                detail=sub_detail,
+                large_image="status_monitoring",
+            )
+        else:
+            self._write_state(
+                state="idle",
+                tool=None,
+                detail="Waiting for input",
+                large_image="status_idle",
+            )
+
+    def session_summary(self):
+        """Write a rich session-end summary with stats before shutting down."""
+        session_seconds = int((datetime.now(timezone.utc) - self._session_start).total_seconds())
+        minutes, seconds = divmod(session_seconds, 60)
+        duration_str = f"{minutes}m {seconds}s"
+
+        summary_parts = [
+            f"Session ended | {duration_str}",
+            f"{self._tool_calls_count} tools used",
+        ]
+        if self._files_modified > 0:
+            summary_parts.append(f"{self._files_modified} files modified")
+        if self._cost_usd > 0:
+            summary_parts.append(f"${self._cost_usd:.4f} cost")
+        if self._subagent_count > 0:
+            summary_parts.append(f"{self._subagent_count} sub-agents")
+
+        self._current_tool = None
+        self._tool_started_at = None
+
         self._write_state(
-            state="idle",
+            state="session_ended",
             tool=None,
-            detail="Waiting for input",
+            detail=" | ".join(summary_parts),
             large_image="status_idle",
         )
 
@@ -352,12 +390,13 @@ def _get_windows_username() -> str:
 
 
 # Singleton instance for the hook module
-_writer: Optional[PresenceWriter] = None
-
+# Singleton instances for the hook module (keyed by state_file path)
+_writers: dict[str, PresenceWriter] = {}
 
 def get_writer(state_file: Optional[Path] = None) -> PresenceWriter:
-    """Get or create the singleton PresenceWriter."""
-    global _writer
-    if _writer is None:
-        _writer = PresenceWriter(state_file)
-    return _writer
+    """Get or create the PresenceWriter for the given state file."""
+    sf = Path(state_file) if state_file and not isinstance(state_file, Path) else (state_file or DEFAULT_STATE_FILE)
+    key = str(sf)
+    if key not in _writers:
+        _writers[key] = PresenceWriter(sf)
+    return _writers[key]

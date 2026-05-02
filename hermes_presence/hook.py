@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from .config import is_disabled, load_config
+from .config import is_disabled, load_config, get_state_file_path
 from .writer import get_writer
 
 # Check for cron markers
@@ -38,6 +38,9 @@ _IS_ORCHESTRATOR = os.environ.get("HERMES_ORCHESTRATOR", "").strip() == "1"
 # Check for profile
 _PROFILE = os.environ.get("HERMES_PROFILE", "main")
 
+# Profile-specific state file path
+_STATE_FILE = get_state_file_path(_PROFILE)
+
 
 def on_session_start(context: dict):
     """
@@ -52,7 +55,7 @@ def on_session_start(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     model = context.get("model", os.environ.get("HERMES_MODEL", "unknown"))
     provider = context.get("provider", os.environ.get("HERMES_PROVIDER", "unknown"))
@@ -81,7 +84,7 @@ def on_tool_start(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     tool_name = context.get("tool_name", "unknown")
     params = context.get("params", {})
@@ -99,7 +102,7 @@ def on_tool_end(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     # If successful, go back to idle
     error = context.get("error")
@@ -124,7 +127,7 @@ def on_tool_error(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     error_msg = str(context.get("error", "") or "Unknown error")[:100]
     writer.error(error_msg)
@@ -142,7 +145,7 @@ def on_thinking(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
     writer.thinking()
 
     _mirror_to_windows_if_wsl()
@@ -160,7 +163,7 @@ def on_model_info(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     model = context.get("model", "")
     provider = context.get("provider", "")
@@ -191,10 +194,21 @@ def on_subagent_change(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     count = context.get("count", 0)
     writer.set_subagent_count(count)
+
+    # If currently idle, refresh state to show orchestrating/idle
+    if not writer._current_tool:
+        if count > 0:
+            writer._write_state(
+                state="orchestrating",
+                detail=f"Monitoring {count} sub-agent(s)",
+                large_image="status_monitoring",
+            )
+        else:
+            writer.idle()
 
     _mirror_to_windows_if_wsl()
 
@@ -209,7 +223,7 @@ def on_kanban_phase(context: dict):
     if is_disabled():
         return
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     phase = context.get("phase")
     writer.set_kanban(phase)
@@ -220,9 +234,10 @@ def on_kanban_phase(context: dict):
 def on_session_end(context: dict):
     """
     Called when the session ends.
+    Writes a rich summary with session stats (tools used, files modified, cost, duration).
     """
-    writer = get_writer()
-    writer.idle()
+    writer = get_writer(_STATE_FILE)
+    writer.session_summary()
     _mirror_to_windows_if_wsl()
 
 
@@ -230,7 +245,7 @@ def on_shutdown(context: dict):
     """
     Called when Hermes shuts down.
     """
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
     writer.shutdown()
     _mirror_to_windows_if_wsl()
 
@@ -243,7 +258,7 @@ def _mirror_to_windows_if_wsl():
         return
 
     try:
-        state_file = Path.home() / ".hermes" / "state" / "presence.json"
+        state_file = _STATE_FILE
         if not state_file.exists():
             return
 
@@ -258,7 +273,9 @@ def _mirror_to_windows_if_wsl():
         windows_appdata = (
             Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
         )
-        windows_state = windows_appdata / "hermes_presence.json"
+        # Profile-specific Windows mirror path
+        mirror_name = "apollo_presence.json" if _PROFILE == "apollo" else "hermes_presence.json"
+        windows_state = windows_appdata / mirror_name
         windows_state.parent.mkdir(parents=True, exist_ok=True)
 
         # Write with safe encoding (avoid em dash)
@@ -334,7 +351,7 @@ def auto_setup(agent=None):
     if is_disabled():
         return None
 
-    writer = get_writer()
+    writer = get_writer(_STATE_FILE)
 
     # Extract model/provider from agent if available
     model = os.environ.get("HERMES_MODEL", "unknown")

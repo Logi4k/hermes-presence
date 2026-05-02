@@ -75,7 +75,7 @@ def _install_config(client_id: str, config_path: Optional[Path] = None):
     print(f"[OK] Config saved to {config_path or '~/.hermes/presence.toml'}")
 
 
-def _install_platform(platform: str, client_id: str, state_file: Path, no_start: bool = False) -> bool:
+def _install_platform(platform: str, client_id: str, state_file: Path, no_start: bool = False, profile: str = "main") -> bool:
     """Set up platform-specific auto-start."""
     try:
         if platform == "linux":
@@ -86,7 +86,7 @@ def _install_platform(platform: str, client_id: str, state_file: Path, no_start:
             launcher = MacOSLauncher(client_id, state_file)
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
-            launcher = WindowsLauncher(client_id, state_file)
+            launcher = WindowsLauncher(client_id, state_file, profile=profile)
         else:
             print(f"[SKIP] No auto-start mechanism for platform: {platform}")
             return True
@@ -127,12 +127,13 @@ def install(
     force: bool = False,
     no_start: bool = False,
     config_path: Optional[Path] = None,
+    profile: str = "main",
 ) -> bool:
     """Run the full installation flow.
 
     Returns True if successful, False on critical failure.
     """
-    print("Hermes Presence Installer v3.0")
+    print(f"Hermes Presence Installer v3.2" + (f" (profile: {profile})" if profile != "main" else ""))
     print("=" * 40)
 
     platform = _detect_platform()
@@ -152,8 +153,8 @@ def install(
     _install_config(client_id, config_path)
 
     # Step 3: Platform-specific setup
-    state_file = get_state_file_path()
-    platform_ok = _install_platform(platform, client_id, state_file, no_start=no_start)
+    state_file = get_state_file_path(profile)
+    platform_ok = _install_platform(platform, client_id, state_file, no_start=no_start, profile=profile)
 
     # Step 4: Verify state file directory exists
     state_file.parent.mkdir(parents=True, exist_ok=True)

@@ -232,12 +232,20 @@ def get_client_id() -> str:
     return config.discord.client_id
 
 
-def get_state_file_path() -> Path:
-    """Get the state file path, respecting env override."""
+def get_state_file_path(profile: str = "main") -> Path:
+    """Get the state file path, respecting env override and profile.
+
+    Main profile: ~/.hermes/state/presence.json
+    Apollo profile: ~/.hermes/state/apollo_presence.json
+    Other profiles: ~/.hermes/state/{profile}_presence.json
+    """
     env_path = _env_state_file()
     if env_path:
         return Path(env_path)
-    return Path.home() / ".hermes" / "state" / "presence.json"
+
+    if profile == "main":
+        return Path.home() / ".hermes" / "state" / "presence.json"
+    return Path.home() / ".hermes" / "state" / f"{profile}_presence.json"
 
 
 def get_mirror_path() -> Optional[Path]:

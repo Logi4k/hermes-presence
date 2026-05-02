@@ -66,6 +66,19 @@ def _run_win(cmd: list, timeout: int = 15) -> subprocess.CompletedProcess:
 class WindowsLauncher(PlatformLauncher):
     """Windows Task Scheduler + shell:startup launcher."""
 
+    def __init__(self, client_id: str, state_file: Path, profile: str = "main"):
+        super().__init__(client_id, state_file)
+        self.profile = profile
+        # Task name differs for apollo profile
+        self._task_name = "ApolloPresence" if profile == "apollo" else TASK_NAME
+        # Monitor target differs for apollo
+        self._monitor_target = Path(os.environ.get("APPDATA", _APPDATA_FALLBACK)) / (
+            "apollo_presence_monitor.py" if profile == "apollo" else "hermes_presence_monitor.py"
+        )
+        self._startup_bat_name = (
+            "apollo_presence.bat" if profile == "apollo" else "hermes_presence.bat"
+        )
+
     def _find_python(self) -> str:
         """Locate Python on Windows."""
         candidates = [
@@ -118,17 +131,18 @@ class WindowsLauncher(PlatformLauncher):
         monitor_script = _monitor_script_content(
             client_id=self.client_id,
             state_file=str(self.state_file),
+            profile=self.profile,
         )
         try:
-            MONITOR_TARGET.parent.mkdir(parents=True, exist_ok=True)
-            MONITOR_TARGET.write_text(monitor_script, encoding="utf-8")
+            self._monitor_target.parent.mkdir(parents=True, exist_ok=True)
+            self._monitor_target.write_text(monitor_script, encoding="utf-8")
         except Exception:
             pass
 
         # Method 1: Try Scheduled Task (needs admin on some systems)
         try:
             result = _run_win([
-                "schtasks", "/Create", "/TN", TASK_NAME,
+                "schtasks", "/Create", "/TN", self._task_name,
                 "/SC", "ONLOGON",
                 "/TR", f'"{python_path}" "{win_target}"',
                 "/F",
@@ -136,7 +150,7 @@ class WindowsLauncher(PlatformLauncher):
                 "/DELAY", "0000:30",
             ])
             if result.returncode == 0:
-                _run_win(["schtasks", "/Run", "/TN", TASK_NAME])
+                _run_win(["schtasks", "/Run", "/TN", self._task_name])
                 print("[OK] Scheduled Task created and started")
                 return True
             else:
@@ -146,7 +160,7 @@ class WindowsLauncher(PlatformLauncher):
 
         # Method 2: Fallback — shell:startup .bat file (no admin needed)
         try:
-            startup_bat = STARTUP_DIR / "hermes_presence.bat"
+            startup_bat = STARTUP_DIR / self._startup_bat_name
             py_path_clean = python_path.replace("\\\\", "\\")
             win_bat_path = _wsl_to_win_path(str(startup_bat))
             bat_content = f'''@echo off
@@ -171,33 +185,33 @@ start "" /B "{py_path_clean}" "{win_target}"
 
     def uninstall(self) -> bool:
         try:
-            _run_win(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"])
+            _run_win(["schtasks", "/Delete", "/TN", self._task_name, "/F"])
         except Exception:
             pass
-        MONITOR_TARGET.unlink(missing_ok=True)
+        self._monitor_target.unlink(missing_ok=True)
         return not self.is_installed()
 
     def is_installed(self) -> bool:
         try:
-            result = _run_win(["schtasks", "/Query", "/TN", TASK_NAME], timeout=5)
+            result = _run_win(["schtasks", "/Query", "/TN", self._task_name], timeout=5)
             if result.returncode == 0:
                 return True
         except Exception:
             pass
         # Check for startup .bat fallback
-        startup_bat = STARTUP_DIR / "hermes_presence.bat"
+        startup_bat = STARTUP_DIR / self._startup_bat_name
         return startup_bat.exists()
 
     def start(self) -> bool:
         try:
-            result = _run_win(["schtasks", "/Run", "/TN", TASK_NAME], timeout=10)
+            result = _run_win(["schtasks", "/Run", "/TN", self._task_name], timeout=10)
             return result.returncode == 0
         except Exception:
             return False
 
     def stop(self) -> bool:
         try:
-            result = _run_win(["schtasks", "/End", "/TN", TASK_NAME], timeout=10)
+            result = _run_win(["schtasks", "/End", "/TN", self._task_name], timeout=10)
             return result.returncode == 0
         except Exception:
             return False
@@ -209,7 +223,7 @@ start "" /B "{py_path_clean}" "{win_target}"
         # Method 1: Check via schtasks
         try:
             result = _run_win(
-                ["schtasks", "/Query", "/TN", TASK_NAME, "/FO", "CSV"],
+                ["schtasks", "/Query", "/TN", self._task_name, "/FO", "CSV"],
                 timeout=5
             )
             running = "Running" in result.stdout
@@ -219,12 +233,13 @@ start "" /B "{py_path_clean}" "{win_target}"
         # Method 2: Fallback — check if any python process is running the presence monitor
         if not running:
             try:
+                monitor_name = "apollo_presence_monitor" if self.profile == "apollo" else "hermes_presence_monitor"
                 ps_cmd = (
                     'Get-WmiObject Win32_Process -Filter "Name=\'python.exe\' OR Name=\'pythonw.exe\'" | '
                     'Select-Object ProcessId, CommandLine | '
-                    'Where-Object { $_.CommandLine -match \'run_presence|hermes_presence_monitor\' } | '
+                    'Where-Object { $_.CommandLine -match \'%s\' } | '
                     'ForEach-Object { "$($_.ProcessId)" }'
-                )
+                ) % monitor_name
                 if _is_wsl():
                     result = subprocess.run(
                         ["powershell.exe", "-Command", ps_cmd],
@@ -262,12 +277,12 @@ start "" /B "{py_path_clean}" "{win_target}"
         }
 
 
-def _monitor_script_content(client_id: str, state_file: str) -> str:
-    # Convert WSL state_file to Windows AppData path for Windows-native execution
-    # On WSL the hook mirrors state to %APPDATA%/hermes_presence.json
+def _monitor_script_content(client_id: str, state_file: str, profile: str = "main") -> str:
+    mirror_name = "apollo_presence.json" if profile == "apollo" else "hermes_presence.json"
     return f'''"""
-Hermes Presence Monitor v3.1 — Windows auto-start script (multi-pipe).
-Generated by hermes-presence install.
+Hermes Presence Monitor v3.2 — Windows auto-start script (multi-pipe).
+Profile: {profile}
+Generated by hermes-presence install --profile {profile}.
 Do not edit manually — run `hermes-presence install` to reconfigure.
 """
 import json
@@ -285,7 +300,7 @@ except ImportError:
     sys.exit(1)
 
 CLIENT_ID = "{client_id}"
-STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence.json"
+STATE_FILE = Path(os.environ.get("APPDATA", "")) / "{mirror_name}"
 PIPES = [0, 1, 2, 3]
 
 # Tool → small_image icon (Discord asset names — must exist in Developer Portal)
@@ -329,12 +344,14 @@ TOOL_ICON_MAP = {{
 }}
 
 STATE_DISPLAY = {{
-    "idle":       "Idle",
-    "working":    "Working",
-    "thinking":   "Thinking",
-    "error":      "Error",
-    "monitoring": "Monitoring",
-    "offline":    "Offline",
+    "idle":          "Idle",
+    "working":       "Working",
+    "thinking":      "Thinking",
+    "error":         "Error",
+    "monitoring":    "Monitoring",
+    "offline":       "Offline",
+    "orchestrating": "Orchestrating",
+    "session_ended": "Session Ended",
 }}
 
 MODEL_SHORT = {{
@@ -461,6 +478,7 @@ signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
 
 # Main loop
+no_conn_count = 0  # Watchdog: consecutive iterations with no connections
 while True:
     prev_count = len(connections)
     connect_all()
@@ -470,11 +488,18 @@ while True:
         new_count = len(connections) - prev_count
         print(f"[MONITOR] +{{new_count}} new pipe(s), forcing state push", flush=True)
         last_hash = ""
+        no_conn_count = 0  # Reset watchdog
 
     if not connections:
-        print("[MONITOR] No Discord pipes available, waiting...", flush=True)
+        no_conn_count += 1
+        if no_conn_count >= 100:  # 5 minutes at 3s sleep
+            print("[MONITOR] No Discord pipes for 5 minutes — exiting for watchdog restart", flush=True)
+            sys.exit(1)  # Exit with error to trigger Task Scheduler restart
+        print(f"[MONITOR] No Discord pipes available, waiting... ({{no_conn_count}}/100)", flush=True)
         time.sleep(5)
         continue
+    else:
+        no_conn_count = 0  # Reset watchdog on successful connection
 
     try:
         if not STATE_FILE.exists():

@@ -1,0 +1,10 @@
+include LICENSE
+include README.md
+include pyproject.toml
+recursive-include hermes_presence *.py
+recursive-include tests *.py
+recursive-include assets *
+recursive-include scripts *
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .git*
