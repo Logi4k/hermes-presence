@@ -6,10 +6,8 @@ from pypresence import Presence, DiscordNotFound, PipeClosed
 CLIENT_ID = "1497983221697347614"
 STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence.json"
 
-# Try all pipes on reconnect — Discord may grab a different pipe after restart.
-# On first connect, prefer pipe 1 (often stable when Canary owns pipe 0).
-FIRST_RUN_PIPES = [int(os.environ.get("DISCORD_PIPE", 1)), 0, 2, 3]
-ALL_PIPES = [0, 1, 2, 3]
+# Try ALL pipes — maintain separate connections for stable + Canary
+PIPES = [0, 1, 2, 3]
 
 ACTIVITY_MAP = {
     "starting":   ("Launching Hermes", "Starting session..."),
@@ -22,64 +20,86 @@ ACTIVITY_MAP = {
 
 print(f"STATE_FILE: {STATE_FILE}", flush=True)
 
-rpc = None
-connected = False
-active_pipe = None
+# connections[pipe_num] = Presence instance
+connections: dict[int, Presence] = {}
 last_hash = ""
-first_connect = True
 
-def _try_pipes(pipe_list):
-    global rpc
-    for pipe_num in pipe_list:
+def connect_all():
+    """Connect to every available Discord pipe simultaneously."""
+    global connections
+    for pipe_num in PIPES:
+        if pipe_num in connections:
+            continue  # Already connected
         try:
             rpc = Presence(CLIENT_ID, pipe=pipe_num)
             rpc.connect()
-            print(f"[OK] Connected to Discord on pipe {pipe_num}", flush=True)
-            return pipe_num
+            connections[pipe_num] = rpc
+            print(f"[OK] Pipe {pipe_num} connected", flush=True)
         except DiscordNotFound:
             continue
         except Exception as e:
             print(f"[pipe {pipe_num}] {e}", flush=True)
             continue
-    return None
 
-def connect():
-    global connected, active_pipe, rpc, first_connect
-    pipes = FIRST_RUN_PIPES if first_connect else ALL_PIPES
-    first_connect = False
+    return len(connections) > 0
 
-    result = _try_pipes(pipes)
-    if result is not None:
-        connected = True
-        active_pipe = result
-        return True
-
-    print("[ERR] No Discord pipe available", flush=True)
-    return False
-
-def shutdown(*args):
-    try:
-        if connected and rpc:
+def disconnect_all():
+    """Clear and close all connections."""
+    global connections
+    for pipe_num, rpc in list(connections.items()):
+        try:
             rpc.clear()
             rpc.close()
-    except: pass
+        except Exception:
+            pass
+    connections.clear()
+
+def update_all(state_text, details, small_img, small_text, start_ts, buttons):
+    """Push the same presence to every connected pipe."""
+    dead = []
+    for pipe_num, rpc in connections.items():
+        try:
+            rpc.update(
+                state=state_text,
+                details=details,
+                large_image="hermes_logo",
+                large_text="Hermes Agent",
+                small_image=small_img,
+                small_text=small_text,
+                start=start_ts,
+                buttons=buttons,
+            )
+        except (PipeClosed, ConnectionError, OSError):
+            print(f"[pipe {pipe_num}] Disconnected", flush=True)
+            dead.append(pipe_num)
+        except Exception as e:
+            print(f"[pipe {pipe_num}] Error: {e}", flush=True)
+
+    for pipe_num in dead:
+        try:
+            connections[pipe_num].close()
+        except Exception:
+            pass
+        del connections[pipe_num]
+
+def shutdown(*args):
+    disconnect_all()
     print("[END]", flush=True)
     sys.exit(0)
 
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
 
-print("[start] Polling...", flush=True)
+print("[start] Multi-pipe monitor (headless-ready)", flush=True)
 
 while True:
-    if not connected:
-        print(f"[reconnect] Trying pipes...", flush=True)
-        time.sleep(2)  # Brief delay — Discord may still be restarting
-        if connect():
-            pass
-        else:
-            time.sleep(5)
-            continue
+    # Connect to any new pipes
+    connect_all()
+
+    if not connections:
+        print("[wait] No Discord pipes available", flush=True)
+        time.sleep(5)
+        continue
 
     try:
         if STATE_FILE.exists():
@@ -102,30 +122,19 @@ while True:
 
             new_hash = f"{state_text}|{details}|{tool}|{sess.get('tool_calls_count',0)}"
             if new_hash != last_hash:
-                rpc.update(
-                    state=state_text,
-                    details=details,
-                    large_image="hermes_logo",
-                    large_text=f"Hermes Agent — {sess.get('model', 'AI')}",
-                    small_image=small_img,
-                    small_text=tool or state_name,
-                    start=int(datetime.fromisoformat(sess.get("started_at", datetime.now(timezone.utc).isoformat())).timestamp()),
-                    buttons=[{"label": "Hermes Agent", "url": "https://github.com/NousResearch/hermes-agent"}],
-                )
+                buttons = [{"label": "Hermes Agent", "url": "https://github.com/NousResearch/hermes-agent"}]
+                start_ts = int(datetime.fromisoformat(sess.get("started_at", datetime.now(timezone.utc).isoformat())).timestamp())
+
+                update_all(state_text, details, small_img, tool or state_name, start_ts, buttons)
                 last_hash = new_hash
-                print(f"[update] {state_text}: {details}", flush=True)
+                pipe_list = ",".join(str(p) for p in connections)
+                print(f"[update → pipes {pipe_list}] {state_text}: {details}", flush=True)
         else:
             if last_hash:
-                rpc.clear()
+                disconnect_all()
                 last_hash = ""
 
-    except (PipeClosed, ConnectionError, OSError):
-        print("[rpc] Lost connection — will reconnect", flush=True)
-        connected = False
-        rpc = None
-        active_pipe = None
     except Exception as e:
-        print(f"[rpc] Error: {e}", flush=True)
-        # Don't disconnect on unknown errors — might be transient
+        print(f"[err] {e}", flush=True)
 
     time.sleep(5)
