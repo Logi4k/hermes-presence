@@ -325,9 +325,9 @@ def _get_windows_username() -> str:
 
     # Fallback: cmd.exe (fast, but may fail for Unicode names)
     try:
-        result = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
-        if result and result != "%USERNAME%":
-            return result
+        username = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
+        if username and username != "%USERNAME%":
+            return username
     except Exception:
         pass
 
@@ -416,7 +416,9 @@ def register_cli_hooks(writer, callbacks: dict):
     Returns:
         dict of wrapped callbacks (same keys). Use these in place of originals.
     """
-    wrapped = {}
+    from typing import Any
+
+    wrapped: dict[str, Any] = {}
 
     orig_start = callbacks.get("tool_start")
     orig_complete = callbacks.get("tool_complete")

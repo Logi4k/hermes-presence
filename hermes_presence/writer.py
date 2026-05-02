@@ -461,9 +461,9 @@ def _get_windows_username() -> str:
 
     # Fallback: cmd.exe (fast, but may fail for Unicode names)
     try:
-        result = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
-        if result and result != "%USERNAME%":
-            return result
+        username = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
+        if username and username != "%USERNAME%":
+            return username
     except Exception:
         pass
 

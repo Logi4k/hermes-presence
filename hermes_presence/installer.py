@@ -109,6 +109,9 @@ def _install_platform(
 ) -> bool:
     """Set up platform-specific auto-start."""
     try:
+        from .platforms import PlatformLauncher
+
+        launcher: PlatformLauncher
         if platform == "linux":
             from .platforms.linux import LinuxLauncher
 
@@ -252,6 +255,9 @@ def uninstall(profile: str = "main") -> bool:
 
     # Stop and remove platform-specific setup
     try:
+        from .platforms import PlatformLauncher
+
+        launcher: PlatformLauncher | None = None
         if platform == "linux":
             from .platforms.linux import LinuxLauncher
 

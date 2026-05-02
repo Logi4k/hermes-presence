@@ -18,7 +18,7 @@ except ImportError:
     try:
         import tomli as tomllib  # type: ignore
     except ImportError:
-        tomllib = None
+        tomllib = None  # type: ignore[assignment]
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional

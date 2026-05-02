@@ -51,7 +51,7 @@ PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 class MacOSLauncher(PlatformLauncher):
     """launchd plist launcher."""
 
-    def __init__(self, client_id: str, state_file: str, profile: str = "main"):
+    def __init__(self, client_id: str, state_file: Path, profile: str = "main"):
         super().__init__(client_id, state_file)
         self.profile = profile
 

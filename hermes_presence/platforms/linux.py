@@ -36,7 +36,7 @@ WantedBy=default.target
 class LinuxLauncher(PlatformLauncher):
     """systemd user unit launcher."""
 
-    def __init__(self, client_id: str, state_file: str, profile: str = "main"):
+    def __init__(self, client_id: str, state_file: Path, profile: str = "main"):
         super().__init__(client_id, state_file)
         self.profile = profile
 

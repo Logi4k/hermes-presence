@@ -28,7 +28,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 try:
     from pypresence import Presence, DiscordNotFound, PipeClosed
@@ -88,10 +88,10 @@ def _is_discord_running() -> bool:
             )
             return "Discord.exe" in result.stdout
         else:
-            result = subprocess.run(
+            pgrep_result = subprocess.run(
                 ["pgrep", "-x", "Discord"], capture_output=True, timeout=5
             )
-            return result.returncode == 0
+            return pgrep_result.returncode == 0
     except Exception:
         return True  # Assume running if we can't check
 
@@ -264,7 +264,7 @@ class UnifiedMonitor:
         dead = []
         for pipe_num, rpc in self.connections.items():
             try:
-                kwargs = {
+                kwargs: dict[str, Any] = {
                     "state": state_text,
                     "details": details,
                     "large_image": self.large_image,
