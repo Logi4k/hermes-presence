@@ -1,16 +1,16 @@
 [project]
 name = "hermes-presence"
-version = "0.1.0"
-description = "Cross-platform Discord Rich Presence for Hermes Agent"
+version = "3.0.0"
+description = "Cross-platform Discord Rich Presence for Hermes Agent — one-command install, all OSes supported"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "Philips Akinola"}
 ]
-keywords = ["hermes", "discord", "rich-presence", "ai-agent"]
+keywords = ["hermes", "discord", "rich-presence", "ai-agent", "cross-platform"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "pypresence>=4.3.0",
+    "tomli-w>=1.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]

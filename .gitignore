@@ -28,6 +28,11 @@ Thumbs.db
 # State files (runtime, not source)
 *.tmp
 presence.json
+hermes_presence_monitor.py
+
+# Local agent workspace/handoff data
+.agent
+.agent.backup.*
 
 # Environment
 .env
