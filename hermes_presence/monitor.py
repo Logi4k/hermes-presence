@@ -59,11 +59,11 @@ def _detect_platform() -> str:
         return "windows"
     if sys.platform == "darwin":
         return "macos"
-    # Check for WSL2
+    # Check for WSL2 (requires both proc/version match AND Windows filesystem)
     try:
         with open("/proc/version") as f:
             content = f.read().lower()
-            if "microsoft" in content or "wsl" in content:
+            if ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists():
                 return "wsl2"
     except Exception:
         pass
@@ -178,6 +178,7 @@ class UnifiedMonitor:
         show_hermes_button: bool = True,
         show_nexus_button: bool = False,
         custom_buttons: Optional[list[dict]] = None,
+        logger = None,
     ):
         if not PYPRESENCE_AVAILABLE:
             raise RuntimeError(
@@ -197,6 +198,8 @@ class UnifiedMonitor:
         self.show_hermes_button = show_hermes_button
         self.show_nexus_button = show_nexus_button
         self.custom_buttons = custom_buttons or []
+
+        self.logger = logger
 
         self.platform = _detect_platform()
         self.connections: dict[int, Presence] = {}
@@ -282,6 +285,12 @@ class UnifiedMonitor:
                 pass
             del self.connections[pipe_num]
 
+        if dead and self.logger:
+            self.logger.log_event("pipe_disconnect", {
+                "dead_pipes": dead,
+                "remaining_pipes": list(self.connections.keys()),
+            })
+
     # ---- Shutdown ----
 
     def _shutdown(self, *args):
@@ -298,10 +307,19 @@ class UnifiedMonitor:
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
 
+        if self.logger:
+            self.logger.log_event("monitor_start", {
+                "platform": self.platform,
+                "state_file": str(self.state_file),
+                "poll_interval": self.poll_interval,
+            })
+
         if self.platform == "wsl2":
             print("[FATAL] WSL2 detected -- Discord IPC does not work under WSL.", flush=True)
             print("[FATAL] Run the monitor on the Windows side instead.", flush=True)
             print("[FATAL] Install: hermes-presence install --wsl2", flush=True)
+            if self.logger:
+                self.logger.log_event("monitor_fatal", {"error": "wsl2_detected"})
             sys.exit(1)
 
         while True:
@@ -310,6 +328,11 @@ class UnifiedMonitor:
             if len(self.connections) > prev_count:
                 print("[OK] New pipe(s) connected, forcing state push", flush=True)
                 self.last_hash = ""
+                if self.logger:
+                    self.logger.log_event("discord_connect", {
+                        "pipe_count": len(self.connections),
+                        "pipes": list(self.connections.keys()),
+                    })
 
             if not self.connections:
                 if not self._disconnected_notified:
@@ -319,6 +342,11 @@ class UnifiedMonitor:
                     if not _is_discord_running():
                         print("[wait] Discord does not appear to be running", flush=True)
 
+                    if self.logger:
+                        self.logger.log_event("discord_disconnect", {
+                            "discord_running": _is_discord_running(),
+                        })
+
                 time.sleep(self.pipe_connect_retry)
                 continue
 
@@ -326,6 +354,8 @@ class UnifiedMonitor:
                 self._poll_once()
             except Exception as e:
                 print(f"[err] {e}", flush=True)
+                if self.logger:
+                    self.logger.log_event("poll_error", {"error": str(e)})
 
             time.sleep(self.poll_interval)
 

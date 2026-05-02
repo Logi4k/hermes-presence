@@ -22,7 +22,7 @@ def _detect_platform() -> str:
     try:
         with open("/proc/version") as f:
             content = f.read().lower()
-            if "microsoft" in content or "wsl" in content:
+            if ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists():
                 return "wsl2"
     except Exception:
         pass

@@ -16,6 +16,7 @@ Or manual: add hook to config.yaml
 """
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -289,15 +290,27 @@ def _mirror_to_windows_if_wsl():
 
 
 def _is_wsl() -> bool:
-    """Detect if running under WSL."""
+    """Detect if running under WSL (requires both kernel marker and Windows mount)."""
     try:
-        return "microsoft" in Path("/proc/version").read_text().lower()
+        content = Path("/proc/version").read_text().lower()
+        return ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists()
     except Exception:
         return False
 
 
 def _get_windows_username() -> str:
-    """Get Windows username from WSL."""
+    """Get Windows username from WSL, handling Unicode correctly."""
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", "[System.Environment]::UserName"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+
+    # Fallback: cmd.exe (fast, but may fail for Unicode names)
     try:
         result = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
         if result and result != "%USERNAME%":
@@ -315,6 +328,7 @@ def _get_windows_username() -> str:
         pass
 
     return ""
+
 
 
 def _load_hermes_hook():

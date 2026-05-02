@@ -244,6 +244,7 @@ def _cmd_run(args):
     """Run the monitor in foreground (debug mode)."""
     from .config import load_config, get_state_file_path
     from .monitor import UnifiedMonitor
+    from .logging import get_logger
 
     cfg = load_config()
 
@@ -253,9 +254,14 @@ def _cmd_run(args):
         print("  Or:     export HERMES_DISCORD_CLIENT_ID=YOUR_CLIENT_ID")
         sys.exit(1)
 
+    # Set up logging
+    log_path = getattr(args, 'log_file', None) or cfg.advanced.log_file or None
+    log = get_logger(Path(log_path) if log_path else None)
+    profile = getattr(args, 'profile', 'main')
+
     monitor = UnifiedMonitor(
         client_id=cfg.discord.client_id,
-        state_file=get_state_file_path(),
+        state_file=get_state_file_path(profile=profile),
         exclude_tools=cfg.tools.exclude,
         idle_timeout=cfg.display.idle_timeout,
         show_model=cfg.display.show_model,
@@ -267,6 +273,7 @@ def _cmd_run(args):
         show_hermes_button=cfg.buttons.hermes_github,
         show_nexus_button=cfg.buttons.nexus_dashboard,
         custom_buttons=cfg.buttons.custom_urls,
+        logger=log,
     )
 
     try:
@@ -307,7 +314,11 @@ def main():
     p_config.add_argument("args", nargs="*", help="[set] <key> <value> | <key> <value> | 'show'")
 
     # run
-    subparsers.add_parser("run", help="Run monitor in foreground (debug)")
+    p_run = subparsers.add_parser("run", help="Run monitor in foreground (debug)")
+    p_run.add_argument("--profile", default="main",
+                       help="Profile to monitor (main, apollo, or any custom profile)")
+    p_run.add_argument("--log-file", default=None,
+                       help="Path to write JSON-lines log output")
 
     # version
     parser.add_argument("--version", action="version", version="hermes-presence v3.1.0")

@@ -67,6 +67,7 @@ class ButtonsConfig:
 class AdvancedConfig:
     poll_interval: int = 5
     pipe_connect_retry: int = 3
+    log_file: str = ""  # path to JSON-lines log, empty = disabled
 
 
 @dataclass
@@ -174,6 +175,8 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
                     config.advanced.poll_interval = int(a["poll_interval"])
                 if "pipe_connect_retry" in a:
                     config.advanced.pipe_connect_retry = int(a["pipe_connect_retry"])
+                if "log_file" in a:
+                    config.advanced.log_file = str(a["log_file"])
 
         except Exception as e:
             # Corrupt config — warn and use defaults
