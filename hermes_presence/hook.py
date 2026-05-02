@@ -322,21 +322,89 @@ def _load_hermes_hook():
 
 
 # Standalone entry — auto-setup
-def auto_setup():
-    """Detect environment and wire up hooks automatically."""
+def auto_setup(agent=None):
+    """Detect environment and wire up hooks automatically.
+
+    Args:
+        agent: AIAgent instance (optional). If provided, extracts model/provider
+               and registers tool-call hooks via monkey-patching.
+    Returns:
+        PresenceWriter instance or None if disabled.
+    """
     if is_disabled():
-        return
+        return None
 
     writer = get_writer()
+
+    # Extract model/provider from agent if available
+    model = os.environ.get("HERMES_MODEL", "unknown")
+    provider = os.environ.get("HERMES_PROVIDER", "unknown")
+
+    if agent is not None:
+        try:
+            model = getattr(agent, 'model', model) or model
+            provider = getattr(agent, 'provider', provider) or provider
+        except Exception:
+            pass
+
     writer.set_session(
-        model=os.environ.get("HERMES_MODEL", "unknown"),
-        provider=os.environ.get("HERMES_PROVIDER", "unknown"),
+        model=model,
+        provider=provider,
         is_cron=_IS_CRON,
         is_orchestrator=_IS_ORCHESTRATOR,
         profile=_PROFILE,
     )
     writer.idle()
     _mirror_to_windows_if_wsl()
+
+    return writer
+
+
+def register_cli_hooks(writer, callbacks: dict):
+    """Wrap CLI callbacks to send presence updates on tool calls.
+
+    Args:
+        writer: PresenceWriter instance from auto_setup()
+        callbacks: dict with optional keys:
+            'tool_start': callable(tool_name, args)
+            'tool_complete': callable(tool_name, success, error_msg)
+            'tool_progress': callable(...)
+            'thinking': callable()
+    Returns:
+        dict of wrapped callbacks (same keys). Use these in place of originals.
+    """
+    wrapped = {}
+
+    orig_start = callbacks.get('tool_start')
+    orig_complete = callbacks.get('tool_complete')
+    orig_thinking = callbacks.get('thinking')
+
+    def _wrapped_tool_start(tool_name, args=None):
+        writer.tool_call(tool_name, args)
+        if orig_start:
+            orig_start(tool_name, args)
+
+    def _wrapped_tool_complete(tool_name, success=True, error_msg=None):
+        if success:
+            writer.idle()
+        else:
+            writer.error(error_msg or f"Tool {tool_name} failed")
+        if orig_complete:
+            orig_complete(tool_name, success, error_msg)
+
+    def _wrapped_thinking():
+        writer.thinking()
+        if orig_thinking:
+            orig_thinking()
+
+    if orig_start:
+        wrapped['tool_start'] = _wrapped_tool_start
+    if orig_complete:
+        wrapped['tool_complete'] = _wrapped_tool_complete
+    if orig_thinking:
+        wrapped['thinking'] = _wrapped_thinking
+
+    return wrapped
 
 
 def setup_presence(config_path: Optional[Path] = None):

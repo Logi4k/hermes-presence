@@ -78,6 +78,8 @@ class PresenceWriter:
         self._is_orchestrator: bool = False
         self._kanban_phase: Optional[str] = None
         self._profile: str = "main"
+        self._tool_started_at: Optional[str] = None
+        self._error_msg: Optional[str] = None
 
     def set_profile(self, profile: str):
         """Set the active Hermes profile name."""
@@ -126,6 +128,7 @@ class PresenceWriter:
         """Record a tool call in progress."""
         self._current_tool = tool_name
         self._tool_calls_count += 1
+        self._tool_started_at = datetime.now(timezone.utc).isoformat()
 
         icon = TOOL_ICONS.get(
             tool_name,
@@ -202,6 +205,7 @@ class PresenceWriter:
 
     def error(self, message: str = ""):
         """Signal an error state."""
+        self._error_msg = message[:100] if message else "An error occurred"
         self._write_state(
             state="error",
             detail=message[:100] if message else "An error occurred",
@@ -211,6 +215,7 @@ class PresenceWriter:
     def idle(self):
         """Clear to idle state."""
         self._current_tool = None
+        self._tool_started_at = None
         self._write_state(
             state="idle",
             tool=None,
@@ -233,17 +238,23 @@ class PresenceWriter:
         session_seconds = int((datetime.now(timezone.utc) - self._session_start).total_seconds())
 
         data = {
+            "version": 3,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "profile": self._profile,
             "activity": {
                 "state": state,
-                "tool": tool or self._current_tool,
+                "tool": tool if tool is not None else self._current_tool,
                 "detail": detail,
                 "large_image": large_image,
                 "kanban_phase": self._kanban_phase,
+                "tool_started_at": self._tool_started_at,
+                "is_error": state == "error",
+                "error_msg": self._error_msg if state == "error" else None,
             },
             "session": {
-                "started": self._session_start.isoformat(),
+                "id": self._session_start.strftime("%Y%m%d_%H%M%S"),
+                "source": self._profile,
+                "started_at": self._session_start.isoformat(),
                 "duration_seconds": session_seconds,
                 "model": self._current_model,
                 "provider": self._current_provider,
