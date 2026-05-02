@@ -338,6 +338,25 @@ class PresenceWriter:
             (datetime.now(timezone.utc) - self._session_start).total_seconds()
         )
 
+        # Preserve model/provider from existing state file if current is unknown.
+        # Belt-and-suspenders: the bridge also restores, but this catches any
+        # edge case where _write_state is reached with a fresh writer.
+        model = self._current_model
+        provider = self._current_provider
+        if (model == "unknown" or provider == "unknown") and self._state_file.exists():
+            try:
+                existing = json.loads(self._state_file.read_text(encoding="utf-8"))
+                sess = existing.get("session", {})
+                if model == "unknown" and sess.get("model", "") not in ("", "unknown"):
+                    model = sess["model"]
+                if provider == "unknown" and sess.get("provider", "") not in (
+                    "",
+                    "unknown",
+                ):
+                    provider = sess["provider"]
+            except (json.JSONDecodeError, OSError):
+                pass
+
         data = {
             "version": 3,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -357,8 +376,8 @@ class PresenceWriter:
                 "source": self._profile,
                 "started_at": self._session_start.isoformat(),
                 "duration_seconds": session_seconds,
-                "model": self._current_model,
-                "provider": self._current_provider,
+                "model": model,
+                "provider": provider,
                 "tool_calls_count": self._tool_calls_count,
                 "subagent_count": self._subagent_count,
                 "files_modified": self._files_modified,

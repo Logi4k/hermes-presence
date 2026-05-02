@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: pip install -e ".[dev]" mypy types-tomli-w
+        run: pip install -e ".[dev]" mypy types-toml
       - name: Type check
         run: mypy hermes_presence/ --ignore-missing-imports
 

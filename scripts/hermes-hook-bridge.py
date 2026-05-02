@@ -168,6 +168,15 @@ def main():
         return 0
 
     writer = get_writer(_STATE_FILE)
+
+    # Restore model/provider and session stats from prior state file.
+    # Each hook runs as a separate process with a fresh writer that
+    # starts with model="unknown". Reading the existing state preserves
+    # model, provider, tool_calls_count, files_modified, cost, etc.
+    # Skip for on_session_start (new session, should start fresh).
+    if event != "on_session_start":
+        writer._restore_from_state_file()
+
     handler = HANDLERS[event]
 
     try:
