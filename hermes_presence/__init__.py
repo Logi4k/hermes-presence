@@ -10,7 +10,7 @@ Usage:
     hermes-presence config      # Show/edit configuration
 """
 
-__version__ = "3.1.0"
+__version__ = "3.1.1"
 
 from .config import PresenceConfig, is_disabled, load_config, save_config
 from .hook import auto_setup, setup_presence

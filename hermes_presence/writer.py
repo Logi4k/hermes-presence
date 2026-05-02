@@ -415,6 +415,37 @@ class PresenceWriter:
         # Mirror to Windows if running under WSL
         self._mirror_to_windows()
 
+        # Webhook notification (best-effort, non-blocking)
+        self._notify_webhook(state, data)
+
+    def _notify_webhook(self, state: str, data: dict):
+        """POST state change to configured webhook URL (best-effort)."""
+        try:
+            from .config import load_config
+
+            cfg = load_config()
+            url = cfg.notify.url.strip()
+            if not url:
+                return
+
+            # Filter by events if configured
+            events_filter = cfg.notify.events
+            if events_filter and state not in events_filter:
+                return
+
+            import urllib.request
+
+            payload = json.dumps(data, ensure_ascii=True).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            pass  # Silent — notifications are best-effort
+
 
 # --- WSL to Windows mirror (module-level utility) ---
 

@@ -72,6 +72,12 @@ class AdvancedConfig:
 
 
 @dataclass
+class NotifyConfig:
+    url: str = ""  # webhook URL for state change notifications
+    events: list[str] = field(default_factory=list)  # e.g. ["error", "session_ended"]
+
+
+@dataclass
 class PresenceConfig:
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
@@ -79,6 +85,7 @@ class PresenceConfig:
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     buttons: ButtonsConfig = field(default_factory=ButtonsConfig)
     advanced: AdvancedConfig = field(default_factory=AdvancedConfig)
+    notify: NotifyConfig = field(default_factory=NotifyConfig)
 
 
 def _env_client_id() -> str:
@@ -178,6 +185,14 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
                     config.advanced.pipe_connect_retry = int(a["pipe_connect_retry"])
                 if "log_file" in a:
                     config.advanced.log_file = str(a["log_file"])
+
+            # notify section
+            if "notify" in raw:
+                n = raw["notify"]
+                if "url" in n:
+                    config.notify.url = str(n["url"]).strip()
+                if "events" in n:
+                    config.notify.events = [str(x) for x in n["events"]]
 
         except Exception as e:
             # Corrupt config — warn and use defaults

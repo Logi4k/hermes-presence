@@ -305,7 +305,7 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print("[start] Hermes Presence Monitor v3.1.0", flush=True)
+        print("[start] Hermes Presence Monitor v3.1.1", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)

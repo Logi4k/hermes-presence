@@ -59,12 +59,81 @@ def _cmd_uninstall(args):
 
 
 def _cmd_status(args):
-    """Show current status."""
+    """Show current status. Use --json for machine-readable output."""
     from .config import get_state_file_path, is_disabled, load_config
 
     cfg = load_config()
     state_file = get_state_file_path()
+    json_mode = getattr(args, "json", False)
 
+    if json_mode:
+        import json as _json
+
+        result = {
+            "client_id_set": bool(cfg.discord.client_id),
+            "state_file": str(state_file),
+            "disabled": is_disabled(),
+            "idle_timeout": cfg.display.idle_timeout,
+            "show_model": cfg.display.show_model,
+            "show_provider": cfg.display.show_provider,
+            "poll_interval": cfg.advanced.poll_interval,
+            "excluded_tools": cfg.tools.exclude,
+            "service": {"running": False, "auto_start": False, "pid": None, "pid_age_s": None},
+            "session": None,
+        }
+
+        # Platform service status
+        from .installer import _detect_platform
+
+        platform = _detect_platform()
+        try:
+            launcher = _get_launcher(platform, cfg.discord.client_id, state_file)
+            if launcher:
+                s = launcher.status()
+                result["service"]["running"] = s.get("running", False)
+                result["service"]["auto_start"] = s.get("auto_start", False)
+                result["service"]["pid"] = s.get("pid")
+                if s.get("pid"):
+                    pid_age = _get_pid_age(s["pid"])
+                    result["service"]["pid_age_s"] = pid_age
+        except Exception:
+            pass
+
+        # Session info from state file
+        if state_file.exists():
+            try:
+                data = _json.loads(state_file.read_text(encoding="utf-8"))
+                act = data.get("activity", {})
+                sess = data.get("session", {})
+                started = sess.get("started_at", "")
+                uptime = None
+                if started:
+                    try:
+                        from datetime import datetime, timezone
+
+                        dt = datetime.fromisoformat(started)
+                        uptime = int((datetime.now(timezone.utc) - dt).total_seconds())
+                    except Exception:
+                        pass
+                result["session"] = {
+                    "state": act.get("state", "unknown"),
+                    "tool": act.get("tool"),
+                    "detail": act.get("detail", ""),
+                    "model": sess.get("model"),
+                    "provider": sess.get("provider"),
+                    "tool_calls": sess.get("tool_calls_count", 0),
+                    "subagents": sess.get("subagent_count", 0),
+                    "files_modified": sess.get("files_modified", 0),
+                    "cost_usd": sess.get("cost_usd", 0.0),
+                    "uptime_seconds": uptime,
+                }
+            except Exception:
+                pass
+
+        print(_json.dumps(result, indent=2))
+        return
+
+    # --- Human-readable mode (existing behaviour) ---
     print("Hermes Presence Status")
     print("=" * 50)
     print(f"  Client ID:      {'[SET]' if cfg.discord.client_id else '[NOT SET]'}")
@@ -74,6 +143,9 @@ def _cmd_status(args):
     print(f"  Show model:     {cfg.display.show_model}")
     print(f"  Show provider:  {cfg.display.show_provider}")
     print(f"  Poll interval:  {cfg.advanced.poll_interval}s")
+    if cfg.notify.url:
+        events_str = ", ".join(cfg.notify.events) if cfg.notify.events else "all"
+        print(f"  Notify URL:     [SET] (events: {events_str})")
     if cfg.tools.exclude:
         print(f"  Excluded tools: {', '.join(cfg.tools.exclude)}")
     print()
@@ -84,29 +156,23 @@ def _cmd_status(args):
     platform = _detect_platform()
 
     try:
-        if platform == "linux":
-            from .platforms.linux import LinuxLauncher
-
-            launcher = LinuxLauncher(cfg.discord.client_id, state_file)
-        elif platform == "macos":
-            from .platforms.macos import MacOSLauncher
-
-            launcher = MacOSLauncher(cfg.discord.client_id, state_file)
-        elif platform in ("windows", "wsl2"):
-            from .platforms.windows import WindowsLauncher
-
-            launcher = WindowsLauncher(cfg.discord.client_id, state_file)
-        else:
-            launcher = None
-
+        launcher = _get_launcher(platform, cfg.discord.client_id, state_file)
         if launcher:
             s = launcher.status()
             print("Service Status")
             print("-" * 40)
             print(f"  Running:     {'Yes' if s.get('running') else 'No'}")
             print(f"  Auto-start:  {'Yes' if s.get('auto_start') else 'No'}")
-            if s.get("pid"):
-                print(f"  PID:         {s['pid']}")
+            pid = s.get("pid")
+            if pid:
+                print(f"  PID:         {pid}")
+                age = _get_pid_age(pid)
+                if age is not None:
+                    mins, secs = divmod(age, 60)
+                    if mins > 0:
+                        print(f"  PID age:     {mins}m {secs}s")
+                    else:
+                        print(f"  PID age:     {secs}s")
             print()
     except ImportError:
         print("(Platform service status unavailable)")
@@ -114,7 +180,7 @@ def _cmd_status(args):
 
     if state_file.exists():
         import json
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         data = json.loads(state_file.read_text(encoding="utf-8"))
         act = data.get("activity", {})
@@ -131,6 +197,22 @@ def _cmd_status(args):
         print(f"  Sub-agents:   {sess.get('subagent_count', 0)}")
         print(f"  Files mod'd:  {sess.get('files_modified', 0)}")
         print(f"  Cost:         ${sess.get('cost_usd', 0):.4f}")
+
+        started = sess.get("started_at", "")
+        if started:
+            try:
+                dt = datetime.fromisoformat(started)
+                uptime_seconds = int((datetime.now(timezone.utc) - dt).total_seconds())
+                mins, secs = divmod(uptime_seconds, 60)
+                if mins >= 60:
+                    hours, mins = divmod(mins, 60)
+                    print(f"  Session uptime: {hours}h {mins}m {secs}s")
+                elif mins > 0:
+                    print(f"  Session uptime: {mins}m {secs}s")
+                else:
+                    print(f"  Session uptime: {secs}s")
+            except Exception:
+                pass
 
         ts = data.get("timestamp", "")
         if ts:
@@ -181,6 +263,11 @@ def _cmd_config(args):
         print(f"  tools.exclude         = {cfg.tools.exclude or '(none)'}")
         print(f"  buttons.hermes_github = {cfg.buttons.hermes_github}")
         print(f"  buttons.nexus_dashboard = {cfg.buttons.nexus_dashboard}")
+        if cfg.notify.url:
+            print("  notify.url            = [SET]")
+            print(f"  notify.events         = {cfg.notify.events or '(all)'}")
+        else:
+            print("  notify.url            = (not set)")
         print()
         print(f"Config file: {DEFAULT_CONFIG_PATH}")
         if not DEFAULT_CONFIG_PATH.exists():
@@ -215,7 +302,7 @@ def _cmd_config(args):
     section, field = parts[0], parts[1]
 
     # Convert value to appropriate type
-    if field in ("exclude", "custom_urls"):
+    if field in ("exclude", "custom_urls", "events"):
         value = value.split(",") if value else []
     elif field in (
         "show_model",
@@ -227,7 +314,11 @@ def _cmd_config(args):
     ):
         value = value.lower() in ("true", "yes", "1", "on")
     elif field in ("idle_timeout", "poll_interval", "pipe_connect_retry"):
-        value = int(value)
+        try:
+            value = int(value)
+        except ValueError:
+            print(f"ERROR: '{field}' requires an integer value, got '{value}'")
+            sys.exit(1)
 
     if section == "discord" and field == "client_id":
         cfg.discord.client_id = value
@@ -241,9 +332,11 @@ def _cmd_config(args):
         setattr(cfg.buttons, field, value)
     elif section == "advanced":
         setattr(cfg.advanced, field, value)
+    elif section == "notify":
+        setattr(cfg.notify, field, value)
     else:
         print(f"ERROR: Unknown config key: {key}")
-        print("  Valid sections: discord, display, windows, tools, buttons, advanced")
+        print("  Valid sections: discord, display, windows, tools, buttons, advanced, notify")
         sys.exit(1)
 
     save_config(cfg)
@@ -305,7 +398,105 @@ def _cmd_help(args):
 
 def _cmd_version(args):
     """Show version information."""
-    print("hermes-presence v3.1.0")
+    print("hermes-presence v3.1.1")
+
+
+def _cmd_update(args):
+    """Self-update hermes-presence from GitHub."""
+    import subprocess
+
+    print("Updating hermes-presence...")
+    print("=" * 40)
+
+    # Try pip install --upgrade from GitHub
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "git+https://github.com/Logi4k/hermes-presence.git@main",
+    ]
+    print(f"Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=False)
+    if result.returncode != 0:
+        print("[FAIL] Update failed. Check pip output above.")
+        sys.exit(1)
+
+    print()
+    print("[DONE] hermes-presence updated to latest.")
+    print("Run 'hermes-presence restart' to restart the monitor.")
+
+
+def _cmd_restart(args):
+    """Restart the presence monitor."""
+    from .config import get_state_file_path, load_config
+
+    cfg = load_config()
+    if not cfg.discord.client_id:
+        print("ERROR: Discord Client ID is not set.")
+        print("  Set it: hermes-presence config set discord.client_id YOUR_CLIENT_ID")
+        sys.exit(1)
+
+    from .installer import _detect_platform
+
+    platform = _detect_platform()
+    state_file = get_state_file_path()
+
+    launcher = _get_launcher(platform, cfg.discord.client_id, state_file)
+    if not launcher:
+        print(f"ERROR: No launcher for platform {platform}")
+        sys.exit(1)
+
+    print(f"Restarting monitor for {platform}...")
+    launcher.stop()
+    import time
+
+    time.sleep(1)
+    if launcher.start():
+        print("[OK] Monitor restarted")
+    else:
+        print("[WARN] Monitor may not have restarted. Try 'hermes-presence install --force'.")
+
+
+def _get_launcher(platform: str, client_id: str, state_file):
+    """Get the platform launcher for the given OS."""
+    try:
+        if platform == "linux":
+            from .platforms.linux import LinuxLauncher
+
+            return LinuxLauncher(client_id, state_file)
+        elif platform == "macos":
+            from .platforms.macos import MacOSLauncher
+
+            return MacOSLauncher(client_id, state_file)
+        elif platform in ("windows", "wsl2"):
+            from .platforms.windows import WindowsLauncher
+
+            return WindowsLauncher(client_id, state_file)
+    except ImportError:
+        pass
+    return None
+
+
+def _get_pid_age(pid: int) -> int | None:
+    """Get the age of a process in seconds, or None if unavailable."""
+    try:
+        import os
+
+        proc_stat = Path(f"/proc/{pid}/stat")
+        if proc_stat.exists():
+            # Field 22 is starttime in clock ticks since boot
+            parts = proc_stat.read_text().split()
+            if len(parts) >= 22:
+                start_ticks = int(parts[21])
+                clk_tck = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+                start_sec = start_ticks / clk_tck
+                uptime_sec = float(Path("/proc/uptime").read_text().split()[0])
+                return int(uptime_sec - start_sec)
+    except Exception:
+        pass
+    return None
 
 
 def _cmd_validate(args):
@@ -408,7 +599,8 @@ def main():
     p_uninstall.add_argument("--profile", default="main", help="Profile to uninstall (default: main)")
 
     # status
-    subparsers.add_parser("status", help="Show current status")
+    p_status = subparsers.add_parser("status", help="Show current status")
+    p_status.add_argument("--json", action="store_true", help="Machine-readable JSON output")
 
     # enable / disable
     subparsers.add_parser("enable", help="Re-enable after disable")
@@ -428,7 +620,7 @@ def main():
     p_run.add_argument("--log-file", default=None, help="Path to write JSON-lines log output")
 
     # version
-    parser.add_argument("--version", action="version", version="hermes-presence v3.1.0")
+    parser.add_argument("--version", action="version", version="hermes-presence v3.1.1")
 
     # help subcommand
     subparsers.add_parser("help", help="Show detailed help")
@@ -438,6 +630,12 @@ def main():
 
     # validate subcommand
     subparsers.add_parser("validate", help="Validate installation")
+
+    # update subcommand
+    subparsers.add_parser("update", help="Self-update from GitHub")
+
+    # restart subcommand
+    subparsers.add_parser("restart", help="Restart the monitor")
 
     args = parser.parse_args()
 
@@ -456,6 +654,8 @@ def main():
         "help": _cmd_help,
         "version": _cmd_version,
         "validate": _cmd_validate,
+        "update": _cmd_update,
+        "restart": _cmd_restart,
     }
 
     cmd = commands.get(args.command)
