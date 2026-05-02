@@ -14,17 +14,17 @@ STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence.json"
 PIPES = [0, 1, 2, 3]
 
 ACTIVITY_MAP = {
-    "starting":       ("Launching Hermes", "Starting session..."),
-    "thinking":       ("Thinking", "Processing..."),
-    "typing":         ("Preparing", "About to respond..."),
-    "working":        ("Working", None),
-    "reading":        ("Reading", None),
-    "idle":           ("Idle", "Waiting for input"),
-    "error":          ("Error", None),
-    "offline":        ("Offline", "Session ended"),
-    "orchestrating":  ("Orchestrating", None),
-    "cron_job":       ("Cron Job", None),
-    "session_ended":  ("Session Ended", None),
+    "starting": ("Launching Hermes", "Starting session..."),
+    "thinking": ("Thinking", "Processing..."),
+    "typing": ("Preparing", "About to respond..."),
+    "working": ("Working", None),
+    "reading": ("Reading", None),
+    "idle": ("Idle", "Waiting for input"),
+    "error": ("Error", None),
+    "offline": ("Offline", "Session ended"),
+    "orchestrating": ("Orchestrating", None),
+    "cron_job": ("Cron Job", None),
+    "session_ended": ("Session Ended", None),
 }
 
 # Tool → small_image icon mapping (overrides state-based icon)

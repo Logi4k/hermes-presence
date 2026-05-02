@@ -32,17 +32,17 @@ STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence_clinical.jso
 PIPES = [0, 1, 2, 3]
 
 ACTIVITY_MAP = {
-    "starting":       ("Launching Hermes", "Clinical Monitor starting..."),
-    "thinking":       ("Thinking", "Processing clinical data..."),
-    "typing":         ("Preparing", "About to respond..."),
-    "working":        ("Working", None),
-    "reading":        ("Reading", None),
-    "idle":           ("Idle", "Waiting for input"),
-    "error":          ("Error", None),
-    "offline":        ("Offline", "Session ended"),
-    "orchestrating":  ("Orchestrating", None),
-    "cron_job":       ("Cron Job", None),
-    "session_ended":  ("Session Ended", None),
+    "starting": ("Launching Hermes", "Clinical Monitor starting..."),
+    "thinking": ("Thinking", "Processing clinical data..."),
+    "typing": ("Preparing", "About to respond..."),
+    "working": ("Working", None),
+    "reading": ("Reading", None),
+    "idle": ("Idle", "Waiting for input"),
+    "error": ("Error", None),
+    "offline": ("Offline", "Session ended"),
+    "orchestrating": ("Orchestrating", None),
+    "cron_job": ("Cron Job", None),
+    "session_ended": ("Session Ended", None),
 }
 
 TOOL_ICON_MAP = {
