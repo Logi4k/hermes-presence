@@ -55,6 +55,41 @@ class PresenceWriter:
         self._error_msg: Optional[str] = None
         self._subagent_tasks: list[str] = []
 
+    def _restore_from_state_file(self):
+        """Restore model/provider and session stats from the existing state file.
+
+        Each hook invocation runs as a separate process, so the writer starts
+        fresh with _current_model='unknown'. Before writing a session-end summary,
+        read the existing state to preserve this info.
+        """
+        if not self._state_file.exists():
+            return
+        try:
+            data = json.loads(self._state_file.read_text(encoding="utf-8"))
+            sess = data.get("session", {})
+            model = sess.get("model", "")
+            provider = sess.get("provider", "")
+            if model and model != "unknown":
+                self._current_model = model
+            if provider and provider != "unknown":
+                self._current_provider = provider
+            # Also restore accumulated stats
+            self._tool_calls_count = sess.get("tool_calls_count", 0)
+            self._files_modified = sess.get("files_modified", 0)
+            self._cost_usd = sess.get("cost_usd", 0.0)
+            self._subagent_count = sess.get("subagent_count", 0)
+            self._is_cron = sess.get("is_cron", False)
+            self._is_orchestrator = sess.get("is_orchestrator", False)
+            # Restore session start time if available
+            started_at = sess.get("started_at")
+            if started_at:
+                try:
+                    self._session_start = datetime.fromisoformat(started_at)
+                except (ValueError, TypeError):
+                    pass
+        except (json.JSONDecodeError, OSError):
+            pass
+
     def _mirror_to_windows(self):
         """Mirror state file to Windows AppData if running under WSL."""
         if not _is_wsl():
@@ -246,7 +281,15 @@ class PresenceWriter:
             )
 
     def session_summary(self):
-        """Write a rich session-end summary with stats before shutting down."""
+        """Write a rich session-end summary with stats before shutting down.
+
+        Reads the existing state file to preserve model/provider/session stats
+        from prior hook invocations (each hook runs as a separate process, so
+        the writer instance starts fresh with no model info).
+        """
+        # Preserve model/provider and session stats from prior state file
+        self._restore_from_state_file()
+
         session_seconds = int(
             (datetime.now(timezone.utc) - self._session_start).total_seconds()
         )
