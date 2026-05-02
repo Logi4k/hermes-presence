@@ -40,8 +40,7 @@ _STATE_FILE = get_state_file_path(_PROFILE)
 
 # Cron / orchestrator detection
 _IS_CRON = any(
-    os.environ.get(v, "").strip()
-    for v in ["HERMES_CRON_JOB_ID", "CRON_JOB_ID", "HERMES_SCHEDULED"]
+    os.environ.get(v, "").strip() for v in ["HERMES_CRON_JOB_ID", "CRON_JOB_ID", "HERMES_SCHEDULED"]
 )
 _IS_ORCHESTRATOR = os.environ.get("HERMES_ORCHESTRATOR", "").strip() == "1"
 

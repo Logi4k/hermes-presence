@@ -76,6 +76,4 @@ TOOL_ICONS: dict[str, dict[str, str]] = {
 }
 
 # Simplified mapping for Discord large_image lookup (derived from TOOL_ICONS)
-TOOL_ICON_MAP: dict[str, str] = {
-    tool: meta["large_image"] for tool, meta in TOOL_ICONS.items()
-}
+TOOL_ICON_MAP: dict[str, str] = {tool: meta["large_image"] for tool, meta in TOOL_ICONS.items()}

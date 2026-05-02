@@ -60,7 +60,7 @@ def _cmd_uninstall(args):
 
 def _cmd_status(args):
     """Show current status."""
-    from .config import load_config, is_disabled, get_state_file_path
+    from .config import get_state_file_path, is_disabled, load_config
 
     cfg = load_config()
     state_file = get_state_file_path()
@@ -162,7 +162,7 @@ def _cmd_disable(args):
 
 def _cmd_config(args):
     """Show or update config."""
-    from .config import load_config, save_config, DEFAULT_CONFIG_PATH
+    from .config import DEFAULT_CONFIG_PATH, load_config, save_config
 
     a = args.args or []
 
@@ -171,9 +171,7 @@ def _cmd_config(args):
         # Show config
         cfg = load_config()
         print("Current configuration:")
-        print(
-            f"  discord.client_id     = {'[SET]' if cfg.discord.client_id else '(not set)'}"
-        )
+        print(f"  discord.client_id     = {'[SET]' if cfg.discord.client_id else '(not set)'}")
         print(f"  display.show_model    = {cfg.display.show_model}")
         print(f"  display.show_provider = {cfg.display.show_provider}")
         print(f"  display.idle_timeout  = {cfg.display.idle_timeout}s")
@@ -211,9 +209,7 @@ def _cmd_config(args):
     # Navigate the dotted key path
     parts = key.split(".")
     if len(parts) < 2:
-        print(
-            "ERROR: Config keys must be in format 'section.key' (e.g. 'discord.client_id')"
-        )
+        print("ERROR: Config keys must be in format 'section.key' (e.g. 'discord.client_id')")
         sys.exit(1)
 
     section, field = parts[0], parts[1]
@@ -257,9 +253,9 @@ def _cmd_config(args):
 
 def _cmd_run(args):
     """Run the monitor in foreground (debug mode)."""
-    from .config import load_config, get_state_file_path
-    from .monitor import UnifiedMonitor
+    from .config import get_state_file_path, load_config
     from .logging import get_logger
+    from .monitor import UnifiedMonitor
 
     cfg = load_config()
 
@@ -314,7 +310,7 @@ def _cmd_version(args):
 
 def _cmd_validate(args):
     """Validate the installation."""
-    from .config import load_config, get_state_file_path
+    from .config import get_state_file_path, load_config
 
     print("Validating Hermes Presence Installation")
     print("=" * 50)
@@ -349,7 +345,7 @@ def _cmd_validate(args):
 
     # Check 4: Discord reachable
     try:
-        from pypresence import Presence, DiscordNotFound
+        from pypresence import DiscordNotFound, Presence
 
         rpc = Presence("0" * 18, pipe=0)
         rpc.connect()
@@ -395,9 +391,7 @@ def main():
     p_install = subparsers.add_parser("install", help="Full one-command setup")
     p_install.add_argument("--client-id", help="Discord Application Client ID")
     p_install.add_argument("--force", action="store_true", help="Force reinstall")
-    p_install.add_argument(
-        "--no-start", action="store_true", help="Don't start immediately"
-    )
+    p_install.add_argument("--no-start", action="store_true", help="Don't start immediately")
     p_install.add_argument(
         "--profile",
         default="main",
@@ -411,9 +405,7 @@ def main():
 
     # uninstall
     p_uninstall = subparsers.add_parser("uninstall", help="Remove hermes-presence")
-    p_uninstall.add_argument(
-        "--profile", default="main", help="Profile to uninstall (default: main)"
-    )
+    p_uninstall.add_argument("--profile", default="main", help="Profile to uninstall (default: main)")
 
     # status
     subparsers.add_parser("status", help="Show current status")
@@ -424,9 +416,7 @@ def main():
 
     # config
     p_config = subparsers.add_parser("config", help="Show or update configuration")
-    p_config.add_argument(
-        "args", nargs="*", help="[set] <key> <value> | <key> <value> | 'show'"
-    )
+    p_config.add_argument("args", nargs="*", help="[set] <key> <value> | <key> <value> | 'show'")
 
     # run
     p_run = subparsers.add_parser("run", help="Run monitor in foreground (debug)")
@@ -435,9 +425,7 @@ def main():
         default="main",
         help="Profile to monitor (main, apollo, or any custom profile)",
     )
-    p_run.add_argument(
-        "--log-file", default=None, help="Path to write JSON-lines log output"
-    )
+    p_run.add_argument("--log-file", default=None, help="Path to write JSON-lines log output")
 
     # version
     parser.add_argument("--version", action="version", version="hermes-presence v3.1.0")

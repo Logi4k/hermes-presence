@@ -109,9 +109,7 @@ class PresenceWriter:
             if not windows_username:
                 return
 
-            windows_appdata = (
-                Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
-            )
+            windows_appdata = Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
 
             # Profile-aware filename
             if self._profile == "main":
@@ -201,11 +199,7 @@ class PresenceWriter:
             try:
                 if params.get("tasks"):
                     task_count = len(params["tasks"])
-                    task_goals = [
-                        t.get("goal", "")[:60]
-                        for t in params["tasks"]
-                        if isinstance(t, dict)
-                    ]
+                    task_goals = [t.get("goal", "")[:60] for t in params["tasks"] if isinstance(t, dict)]
                     self._subagent_tasks = task_goals
                     detail = f"Spawning {task_count} sub-agent(s)"
                     self._subagent_count += task_count
@@ -304,9 +298,7 @@ class PresenceWriter:
         # Preserve model/provider and session stats from prior state file
         self._restore_from_state_file()
 
-        session_seconds = int(
-            (datetime.now(timezone.utc) - self._session_start).total_seconds()
-        )
+        session_seconds = int((datetime.now(timezone.utc) - self._session_start).total_seconds())
         minutes, seconds = divmod(session_seconds, 60)
         duration_str = f"{minutes}m {seconds}s"
 
@@ -348,9 +340,7 @@ class PresenceWriter:
     ):
         """Atomic write to state file."""
 
-        session_seconds = int(
-            (datetime.now(timezone.utc) - self._session_start).total_seconds()
-        )
+        session_seconds = int((datetime.now(timezone.utc) - self._session_start).total_seconds())
 
         # Preserve model/provider from existing state file if current is unknown.
         # Belt-and-suspenders: the bridge also restores, but this catches any
@@ -433,9 +423,7 @@ def _is_wsl() -> bool:
     """Detect if running under WSL (requires both kernel marker and Windows mount)."""
     try:
         content = Path("/proc/version").read_text().lower()
-        return ("microsoft" in content or "wsl" in content) and Path(
-            "/mnt/c/Windows"
-        ).exists()
+        return ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists()
     except Exception:
         return False
 

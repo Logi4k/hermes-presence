@@ -100,9 +100,7 @@ def disconnect_all():
     connections.clear()
 
 
-def update_all(
-    state_text, details, small_img, small_text, start_ts, buttons, party_size=None
-):
+def update_all(state_text, details, small_img, small_text, start_ts, buttons, party_size=None):
     dead = []
     for pipe_num, rpc in connections.items():
         try:
@@ -204,9 +202,7 @@ while True:
             if len(details) > 128:
                 details = details[:125] + "..."
 
-            model_label = _format_model_label(
-                sess.get("model", ""), sess.get("provider", "")
-            )
+            model_label = _format_model_label(sess.get("model", ""), sess.get("provider", ""))
             if model_label:
                 state_text = f"{state_text} · {model_label}"
 

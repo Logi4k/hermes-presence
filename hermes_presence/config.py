@@ -19,8 +19,8 @@ except ImportError:
         import tomli as tomllib  # type: ignore
     except ImportError:
         tomllib = None  # type: ignore[assignment]
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 try:
@@ -220,9 +220,7 @@ def _write_toml(d: dict, path: Path):
                         items.append(f'"{escaped}"')
                     elif isinstance(item, dict):
                         inner = ", ".join(
-                            f"{ik} = {iv}"
-                            if not isinstance(iv, str)
-                            else f'{ik} = "{iv}"'
+                            f"{ik} = {iv}" if not isinstance(iv, str) else f'{ik} = "{iv}"'
                             for ik, iv in item.items()
                         )
                         items.append(f"{{ {inner} }}")
@@ -231,8 +229,7 @@ def _write_toml(d: dict, path: Path):
                 lines.append(f"{k} = [{', '.join(items)}]")
             elif isinstance(v, dict):
                 inner = ", ".join(
-                    f'{ik} = "{iv}"' if isinstance(iv, str) else f"{ik} = {iv}"
-                    for ik, iv in v.items()
+                    f'{ik} = "{iv}"' if isinstance(iv, str) else f"{ik} = {iv}" for ik, iv in v.items()
                 )
                 lines.append(f"{{ {inner} }}")
             else:
@@ -282,9 +279,7 @@ def save_config(config: PresenceConfig, config_path: Optional[Path] = None):
 
     # Also remove sections where every value is an empty list
     for k in list(d):
-        if isinstance(d[k], dict) and all(
-            isinstance(v, list) and len(v) == 0 for v in d[k].values()
-        ):
+        if isinstance(d[k], dict) and all(isinstance(v, list) and len(v) == 0 for v in d[k].values()):
             del d[k]
 
     if tomli_w is not None:
@@ -337,9 +332,7 @@ def get_mirror_path(profile: str = "main") -> Optional[Path]:
     """
     windows_user = os.environ.get("WINDOWS_USER", "").strip()
     if windows_user:
-        filename = (
-            "hermes_presence.json" if profile == "main" else f"{profile}_presence.json"
-        )
+        filename = "hermes_presence.json" if profile == "main" else f"{profile}_presence.json"
         return Path(f"/mnt/c/Users/{windows_user}/AppData/Roaming/{filename}")
     return None
 
@@ -378,7 +371,8 @@ def verify_config(config_path: Optional[Path] = None) -> bool:
         if not parent.exists():
             if os.access(os.getcwd(), os.W_OK):
                 print(
-                    f"[WARN] State file directory {parent} does not exist; it will be created on first run",
+                    f"[WARN] State file directory {parent} does not exist; "
+                    "it will be created on first run",
                     file=sys.stderr,
                 )
         elif not os.access(parent, os.W_OK):

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .config import load_config, save_config, get_state_file_path
+from .config import get_state_file_path, load_config, save_config
 
 
 def _detect_platform() -> str:
@@ -21,9 +21,7 @@ def _detect_platform() -> str:
     try:
         with open("/proc/version") as f:
             content = f.read().lower()
-            if ("microsoft" in content or "wsl" in content) and Path(
-                "/mnt/c/Windows"
-            ).exists():
+            if ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists():
                 return "wsl2"
     except Exception:
         pass
@@ -84,9 +82,7 @@ def _walk_discord_setup(client_id: Optional[str] = None) -> str:
             assets_display = "<package assets directory>"
     print(f"  Upload the 8 PNG files from: {assets_display}")
     print("  Name them: hermes_logo, status_active, status_error, status_idle,")
-    print(
-        "            status_monitoring, status_researching, status_standby, status_working"
-    )
+    print("            status_monitoring, status_researching, status_standby, status_working")
     print()
 
     return cid
@@ -152,9 +148,7 @@ def _install_platform(
         return True
 
     except ImportError as e:
-        print(
-            f"[WARN] Auto-start was not configured: platform module not available ({e})"
-        )
+        print(f"[WARN] Auto-start was not configured: platform module not available ({e})")
         return True
     except Exception as e:
         print(f"[ERROR] Platform setup failed: {e}")
@@ -173,10 +167,7 @@ def install(
 
     Returns True if successful, False on critical failure.
     """
-    print(
-        "Hermes Presence Installer v3.1.0"
-        + (f" (profile: {profile})" if profile != "main" else "")
-    )
+    print("Hermes Presence Installer v3.1.0" + (f" (profile: {profile})" if profile != "main" else ""))
     print("=" * 40)
 
     platform = _detect_platform()
@@ -239,7 +230,8 @@ def install(
         except Exception:
             print()
             print(
-                "WARNING: Discord does not appear to be running. Presence won't show until Discord starts."
+                "WARNING: Discord does not appear to be running. "
+                "Presence won't show until Discord starts."
             )
 
     return client_id is not None and bool(client_id.strip())

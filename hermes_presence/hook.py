@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from .config import is_disabled, get_state_file_path
+from .config import get_state_file_path, is_disabled
 from .writer import get_writer
 
 # Check for cron markers
@@ -272,9 +272,7 @@ def _mirror_to_windows_if_wsl():
         if not windows_username:
             return
 
-        windows_appdata = (
-            Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
-        )
+        windows_appdata = Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
         # Profile-specific Windows mirror path
         if _PROFILE == "main":
             mirror_name = "hermes_presence.json"
@@ -297,9 +295,7 @@ def _is_wsl() -> bool:
     """Detect if running under WSL (requires both kernel marker and Windows mount)."""
     try:
         content = Path("/proc/version").read_text().lower()
-        return ("microsoft" in content or "wsl" in content) and Path(
-            "/mnt/c/Windows"
-        ).exists()
+        return ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists()
     except Exception:
         return False
 

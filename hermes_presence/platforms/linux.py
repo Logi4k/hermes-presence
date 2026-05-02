@@ -8,8 +8,8 @@ Enables: systemctl --user enable hermes-presence
 import subprocess
 import sys
 from pathlib import Path
-from . import PlatformLauncher
 
+from . import PlatformLauncher
 
 SYSTEMD_UNIT_BASE = "hermes-presence"
 
@@ -48,9 +48,7 @@ class LinuxLauncher(PlatformLauncher):
 
     @property
     def _unit_path(self) -> Path:
-        return (
-            Path.home() / ".config" / "systemd" / "user" / f"{self._unit_name}.service"
-        )
+        return Path.home() / ".config" / "systemd" / "user" / f"{self._unit_name}.service"
 
     def _python_path(self) -> str:
         """Find the Python interpreter to use."""

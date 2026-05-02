@@ -8,8 +8,8 @@ Loads: launchctl load ~/Library/LaunchAgents/com.hermes.presence.plist
 import subprocess
 import sys
 from pathlib import Path
-from . import PlatformLauncher
 
+from . import PlatformLauncher
 
 PLIST_LABEL_BASE = "com.hermes.presence"
 
@@ -129,18 +129,14 @@ class MacOSLauncher(PlatformLauncher):
 
     def start(self) -> bool:
         try:
-            subprocess.run(
-                ["launchctl", "start", self._label], capture_output=True, timeout=10
-            )
+            subprocess.run(["launchctl", "start", self._label], capture_output=True, timeout=10)
             return True
         except Exception:
             return False
 
     def stop(self) -> bool:
         try:
-            subprocess.run(
-                ["launchctl", "stop", self._label], capture_output=True, timeout=10
-            )
+            subprocess.run(["launchctl", "stop", self._label], capture_output=True, timeout=10)
             return True
         except Exception:
             return False

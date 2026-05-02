@@ -86,9 +86,7 @@ def disconnect_all():
     connections.clear()
 
 
-def update_all(
-    state_text, details, small_img, small_text, start_ts, buttons, party_size=None
-):
+def update_all(state_text, details, small_img, small_text, start_ts, buttons, party_size=None):
     """Push the same presence to every connected pipe."""
     dead = []
     for pipe_num, rpc in connections.items():
@@ -175,9 +173,7 @@ def _format_model_label(model, provider):
     return ""
 
 
-print(
-    "[start] Multi-pipe monitor v2 (model + tool icons + subagents + timer)", flush=True
-)
+print("[start] Multi-pipe monitor v2 (model + tool icons + subagents + timer)", flush=True)
 
 while True:
     # Connect to any new pipes
@@ -206,9 +202,7 @@ while True:
                 details = details[:125] + "..."
 
             # #2: Append model name to state text
-            model_label = _format_model_label(
-                sess.get("model", ""), sess.get("provider", "")
-            )
+            model_label = _format_model_label(sess.get("model", ""), sess.get("provider", ""))
             if model_label:
                 state_text = f"{state_text} · {model_label}"
 

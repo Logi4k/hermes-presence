@@ -28,10 +28,10 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
 try:
-    from pypresence import Presence, DiscordNotFound, PipeClosed
+    from pypresence import DiscordNotFound, PipeClosed, Presence
 
     PYPRESENCE_AVAILABLE = True
 except ImportError:
@@ -64,9 +64,7 @@ def _detect_platform() -> str:
     try:
         with open("/proc/version") as f:
             content = f.read().lower()
-            if ("microsoft" in content or "wsl" in content) and Path(
-                "/mnt/c/Windows"
-            ).exists():
+            if ("microsoft" in content or "wsl" in content) and Path("/mnt/c/Windows").exists():
                 return "wsl2"
     except Exception:
         pass
@@ -88,9 +86,7 @@ def _is_discord_running() -> bool:
             )
             return "Discord.exe" in result.stdout
         else:
-            pgrep_result = subprocess.run(
-                ["pgrep", "-x", "Discord"], capture_output=True, timeout=5
-            )
+            pgrep_result = subprocess.run(["pgrep", "-x", "Discord"], capture_output=True, timeout=5)
             return pgrep_result.returncode == 0
     except Exception:
         return True  # Assume running if we can't check
@@ -186,9 +182,7 @@ class UnifiedMonitor:
         logger=None,
     ):
         if not PYPRESENCE_AVAILABLE:
-            raise RuntimeError(
-                "pypresence is required. Install: pip install pypresence"
-            )
+            raise RuntimeError("pypresence is required. Install: pip install pypresence")
 
         self.client_id = client_id
         self.state_file = state_file
@@ -358,9 +352,7 @@ class UnifiedMonitor:
                     self._disconnected_notified = True
 
                     if not _is_discord_running():
-                        print(
-                            "[wait] Discord does not appear to be running", flush=True
-                        )
+                        print("[wait] Discord does not appear to be running", flush=True)
 
                     if self.logger:
                         self.logger.log_event(
@@ -540,7 +532,7 @@ def create_monitor(
 
     Prefers explicit args, falls back to config file + env vars.
     """
-    from .config import load_config, get_state_file_path
+    from .config import get_state_file_path, load_config
 
     cfg = load_config(config_path)
 

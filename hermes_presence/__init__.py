@@ -12,10 +12,10 @@ Usage:
 
 __version__ = "3.1.0"
 
-from .writer import PresenceWriter
+from .config import PresenceConfig, is_disabled, load_config, save_config
+from .hook import auto_setup, setup_presence
 from .monitor import UnifiedMonitor, create_monitor
-from .config import load_config, save_config, PresenceConfig, is_disabled
-from .hook import setup_presence, auto_setup
+from .writer import PresenceWriter
 
 __all__ = [
     "PresenceWriter",
