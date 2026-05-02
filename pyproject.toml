@@ -23,7 +23,7 @@ classifiers = [
 dependencies = [
     "pypresence>=4.3.0",
     "tomli>=2.0; python_version < '3.11'",
-    "tomli-w>=1.0; python_version < '3.11'",
+    "tomli-w>=1.0",
 ]
 
 [project.optional-dependencies]

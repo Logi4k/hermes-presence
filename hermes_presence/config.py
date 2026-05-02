@@ -191,13 +191,58 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
     return config
 
 
-def save_config(config: PresenceConfig, config_path: Optional[Path] = None):
-    """Save config to disk as TOML."""
-    if tomli_w is None:
-        raise ImportError(
-            "tomli_w is required to save config. Install with: pip install tomli-w"
-        )
+def _write_toml(d: dict, path: Path):
+    """Pure-Python TOML writer for simple nested dicts.
 
+    Handles str, int, float, bool, list-of-str/list-of-dict values.
+    Nested dicts become [section.subsection] headers.
+    """
+    lines = []
+
+    for section, data in d.items():
+        if not isinstance(data, dict):
+            continue
+        lines.append(f"[{section}]")
+        for k, v in data.items():
+            if isinstance(v, bool):
+                lines.append(f"{k} = {str(v).lower()}")
+            elif isinstance(v, (int, float)):
+                lines.append(f"{k} = {v}")
+            elif isinstance(v, str):
+                escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(f'{k} = "{escaped}"')
+            elif isinstance(v, list):
+                items = []
+                for item in v:
+                    if isinstance(item, str):
+                        escaped = item.replace("\\", "\\\\").replace('"', '\\"')
+                        items.append(f'"{escaped}"')
+                    elif isinstance(item, dict):
+                        inner = ", ".join(
+                            f'{ik} = {iv}' if not isinstance(iv, str) else f'{ik} = "{iv}"'
+                            for ik, iv in item.items()
+                        )
+                        items.append(f"{{ {inner} }}")
+                    else:
+                        items.append(str(item))
+                lines.append(f"{k} = [{', '.join(items)}]")
+            else:
+                lines.append(f"{k} = {v}")
+        lines.append("")
+
+    # Remove trailing blank line
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def save_config(config: PresenceConfig, config_path: Optional[Path] = None):
+    """Save config to disk as TOML.
+
+    Uses tomli_w if available, falls back to a pure-Python writer.
+    """
     path = config_path or DEFAULT_CONFIG_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -222,8 +267,18 @@ def save_config(config: PresenceConfig, config_path: Optional[Path] = None):
     # Remove entirely empty sections
     d = {k: v for k, v in d.items() if v}
 
-    with open(path, "wb") as f:
-        tomli_w.dump(d, f)
+    # Also remove sections where every value is an empty list
+    for k in list(d):
+        if isinstance(d[k], dict) and all(
+            isinstance(v, list) and len(v) == 0 for v in d[k].values()
+        ):
+            del d[k]
+
+    if tomli_w is not None:
+        with open(path, "wb") as f:
+            tomli_w.dump(d, f)
+    else:
+        _write_toml(d, path)
 
 
 def is_disabled() -> bool:
