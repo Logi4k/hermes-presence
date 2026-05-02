@@ -376,7 +376,7 @@ def _monitor_script_content(
     client_id: str, state_file: str, profile: str = "main"
 ) -> str:
     mirror_name = (
-        "apollo_presence.json" if profile == "apollo" else "hermes_presence.json"
+        "hermes_presence.json" if profile == "main" else f"{profile}_presence.json"
     )
     return f'''"""
 Hermes Presence Monitor v3.1.0 — Windows auto-start script (all-pipe).

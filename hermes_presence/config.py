@@ -330,11 +330,17 @@ def get_state_file_path(profile: str = "main") -> Path:
     return Path.home() / ".hermes" / "state" / f"{profile}_presence.json"
 
 
-def get_mirror_path() -> Optional[Path]:
-    """Get the Windows mirror path for WSL2 setups."""
+def get_mirror_path(profile: str = "main") -> Optional[Path]:
+    """Get the Windows mirror path for WSL2 setups.
+
+    Profile-aware: main → hermes_presence.json, others → {profile}_presence.json
+    """
     windows_user = os.environ.get("WINDOWS_USER", "").strip()
     if windows_user:
-        return Path(f"/mnt/c/Users/{windows_user}/AppData/Roaming/hermes_presence.json")
+        filename = (
+            "hermes_presence.json" if profile == "main" else f"{profile}_presence.json"
+        )
+        return Path(f"/mnt/c/Users/{windows_user}/AppData/Roaming/{filename}")
     return None
 
 

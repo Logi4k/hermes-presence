@@ -91,7 +91,14 @@ class PresenceWriter:
             pass
 
     def _mirror_to_windows(self):
-        """Mirror state file to Windows AppData if running under WSL."""
+        """Mirror state file to Windows AppData if running under WSL.
+
+        Uses profile-specific filenames so multiple Hermes profiles
+        can coexist without overwriting each other:
+          main     → hermes_presence.json
+          clinical → clinical_presence.json
+          other    → {profile}_presence.json
+        """
         if not _is_wsl():
             return
 
@@ -105,7 +112,14 @@ class PresenceWriter:
             windows_appdata = (
                 Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
             )
-            windows_state = windows_appdata / "hermes_presence.json"
+
+            # Profile-aware filename
+            if self._profile == "main":
+                filename = "hermes_presence.json"
+            else:
+                filename = f"{self._profile}_presence.json"
+
+            windows_state = windows_appdata / filename
             windows_state.parent.mkdir(parents=True, exist_ok=True)
 
             # Safe encoding (avoid Unicode that breaks Windows cp1252 console)
