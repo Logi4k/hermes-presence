@@ -6,10 +6,10 @@ from pypresence import Presence, DiscordNotFound, PipeClosed
 CLIENT_ID = "1497983221697347614"
 STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence.json"
 
-# Try pipes 1, 0, 2, 3 in that order — pipe 1 is usually stable Discord
-# when Canary grabbed pipe 0. Override with DISCORD_PIPE env var.
-PIPE_ORDER = [int(os.environ.get("DISCORD_PIPE", 1)),
-              *[p for p in (0, 2, 3) if p != int(os.environ.get("DISCORD_PIPE", 1))]]
+# Try all pipes on reconnect — Discord may grab a different pipe after restart.
+# On first connect, prefer pipe 1 (often stable when Canary owns pipe 0).
+FIRST_RUN_PIPES = [int(os.environ.get("DISCORD_PIPE", 1)), 0, 2, 3]
+ALL_PIPES = [0, 1, 2, 3]
 
 ACTIVITY_MAP = {
     "starting":   ("Launching Hermes", "Starting session..."),
@@ -21,28 +21,39 @@ ACTIVITY_MAP = {
 }
 
 print(f"STATE_FILE: {STATE_FILE}", flush=True)
-print(f"PIPE_ORDER: {PIPE_ORDER}", flush=True)
 
 rpc = None
 connected = False
 active_pipe = None
 last_hash = ""
+first_connect = True
 
-def connect():
-    global connected, rpc, active_pipe
-    for pipe_num in PIPE_ORDER:
+def _try_pipes(pipe_list):
+    global rpc
+    for pipe_num in pipe_list:
         try:
             rpc = Presence(CLIENT_ID, pipe=pipe_num)
             rpc.connect()
-            connected = True
-            active_pipe = pipe_num
             print(f"[OK] Connected to Discord on pipe {pipe_num}", flush=True)
-            return True
+            return pipe_num
         except DiscordNotFound:
             continue
         except Exception as e:
             print(f"[pipe {pipe_num}] {e}", flush=True)
             continue
+    return None
+
+def connect():
+    global connected, active_pipe, rpc, first_connect
+    pipes = FIRST_RUN_PIPES if first_connect else ALL_PIPES
+    first_connect = False
+
+    result = _try_pipes(pipes)
+    if result is not None:
+        connected = True
+        active_pipe = result
+        return True
+
     print("[ERR] No Discord pipe available", flush=True)
     return False
 
@@ -62,6 +73,8 @@ print("[start] Polling...", flush=True)
 
 while True:
     if not connected:
+        print(f"[reconnect] Trying pipes...", flush=True)
+        time.sleep(2)  # Brief delay — Discord may still be restarting
         if connect():
             pass
         else:
@@ -106,12 +119,13 @@ while True:
                 rpc.clear()
                 last_hash = ""
 
-    except (PipeClosed, ConnectionError):
-        print("[rpc] Lost connection", flush=True)
+    except (PipeClosed, ConnectionError, OSError):
+        print("[rpc] Lost connection — will reconnect", flush=True)
         connected = False
         rpc = None
         active_pipe = None
     except Exception as e:
         print(f"[rpc] Error: {e}", flush=True)
+        # Don't disconnect on unknown errors — might be transient
 
     time.sleep(5)
