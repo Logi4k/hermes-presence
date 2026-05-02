@@ -165,7 +165,7 @@ def _cmd_config(args):
         # Show config
         cfg = load_config()
         print("Current configuration:")
-        print(f"  discord.client_id     = {cfg.discord.client_id or '(not set)'}")
+        print(f"  discord.client_id     = {'[SET]' if cfg.discord.client_id else '(not set)'}")
         print(f"  display.show_model    = {cfg.display.show_model}")
         print(f"  display.show_provider = {cfg.display.show_provider}")
         print(f"  display.idle_timeout  = {cfg.display.idle_timeout}s")
@@ -307,7 +307,7 @@ def main():
     subparsers.add_parser("run", help="Run monitor in foreground (debug)")
 
     # version
-    parser.add_argument("--version", action="version", version="hermes-presence v3.0.0")
+    parser.add_argument("--version", action="version", version="hermes-presence v3.1.0")
 
     args = parser.parse_args()
 

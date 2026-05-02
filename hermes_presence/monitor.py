@@ -321,7 +321,7 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print(f"[start] Hermes Presence Monitor v3.0", flush=True)
+        print(f"[start] Hermes Presence Monitor v3.1", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
@@ -331,7 +331,11 @@ class UnifiedMonitor:
             print("[info] Use: hermes-presence install --wsl2", flush=True)
 
         while True:
+            prev_count = len(self.connections)
             self.connect_all()
+            if len(self.connections) > prev_count:
+                print("[OK] New pipe(s) connected, forcing state push", flush=True)
+                self.last_hash = ""
 
             if not self.connections:
                 if not self._disconnected_notified:

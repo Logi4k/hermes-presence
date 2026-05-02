@@ -10,7 +10,7 @@ Usage:
     hermes-presence config      # Show/edit configuration
 """
 
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 from .writer import PresenceWriter
 from .monitor import UnifiedMonitor, create_monitor
