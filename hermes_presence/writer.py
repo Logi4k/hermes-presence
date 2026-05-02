@@ -10,6 +10,7 @@ Thread-safe: uses atomic writes (write to temp + rename).
 
 import json
 import os
+import shutil
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -80,6 +81,33 @@ class PresenceWriter:
         self._profile: str = "main"
         self._tool_started_at: Optional[str] = None
         self._error_msg: Optional[str] = None
+
+    def _mirror_to_windows(self):
+        """Mirror state file to Windows AppData if running under WSL."""
+        if not _is_wsl():
+            return
+
+        try:
+            content = self._state_file.read_text(encoding="utf-8")
+
+            windows_username = _get_windows_username()
+            if not windows_username:
+                return
+
+            windows_appdata = (
+                Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
+            )
+            windows_state = windows_appdata / "hermes_presence.json"
+            windows_state.parent.mkdir(parents=True, exist_ok=True)
+
+            # Safe encoding (avoid Unicode that breaks Windows cp1252 console)
+            safe_content = content.replace("\u2014", "--").replace("\u2013", "-")
+
+            with open(windows_state, "w", encoding="utf-8") as f:
+                f.write(safe_content)
+
+        except Exception:
+            pass  # Silent -- mirror is best-effort
 
     def set_profile(self, profile: str):
         """Set the active Hermes profile name."""
@@ -287,6 +315,40 @@ class PresenceWriter:
                 Path(tmp_path).unlink()
             except Exception:
                 pass
+
+        # Mirror to Windows if running under WSL
+        self._mirror_to_windows()
+
+
+# --- WSL to Windows mirror (module-level utility) ---
+
+def _is_wsl() -> bool:
+    """Detect if running under WSL."""
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except Exception:
+        return False
+
+
+def _get_windows_username() -> str:
+    """Get Windows username from WSL."""
+    try:
+        result = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
+        if result and result != "%USERNAME%":
+            return result
+    except Exception:
+        pass
+
+    # Fallback: scan /mnt/c/Users/
+    try:
+        users_dir = Path("/mnt/c/Users")
+        for p in users_dir.iterdir():
+            if p.is_dir() and (p / "AppData").exists():
+                return p.name
+    except Exception:
+        pass
+
+    return ""
 
 
 # Singleton instance for the hook module
