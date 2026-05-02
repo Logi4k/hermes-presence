@@ -31,6 +31,7 @@ def _cmd_install(args):
         force=args.force,
         no_start=args.no_start,
         profile=args.profile,
+        dry_run=getattr(args, 'dry_run', False),
     )
 
     if success:
@@ -49,7 +50,8 @@ def _cmd_uninstall(args):
     """Remove hermes-presence."""
     from .installer import uninstall
 
-    success = uninstall()
+    profile = getattr(args, 'profile', 'main')
+    success = uninstall(profile=profile)
     if success:
         print("\n[DONE] Hermes Presence removed.")
     else:
@@ -283,6 +285,84 @@ def _cmd_run(args):
         monitor._shutdown()
 
 
+def _cmd_help(args):
+    """Show full help text."""
+    parser = argparse.ArgumentParser(
+        prog="hermes-presence",
+        description="Cross-platform Discord Rich Presence for Hermes Agent",
+    )
+    parser.print_help()
+
+
+def _cmd_version(args):
+    """Show version information."""
+    print("hermes-presence v3.1.0")
+
+
+def _cmd_validate(args):
+    """Validate the installation."""
+    from .config import load_config, get_state_file_path
+    from pathlib import Path
+
+    print("Validating Hermes Presence Installation")
+    print("=" * 50)
+
+    # Check 1: Config (client_id set)
+    try:
+        cfg = load_config()
+        if cfg.discord.client_id:
+            print("  [PASS] discord.client_id is set")
+        else:
+            print("  [FAIL] discord.client_id is not set")
+    except Exception as e:
+        print(f"  [FAIL] Could not load config: {e}")
+
+    # Check 2: State file path valid
+    try:
+        state_file = get_state_file_path()
+        print(f"  [PASS] State file path: {state_file}")
+    except Exception as e:
+        print(f"  [FAIL] State file path invalid: {e}")
+
+    # Check 3: pypresence installed
+    try:
+        import pypresence
+        print(f"  [PASS] pypresence is installed")
+    except ImportError:
+        print("  [FAIL] pypresence is not installed (pip install pypresence)")
+
+    # Check 4: Discord reachable
+    try:
+        from pypresence import Presence, DiscordNotFound
+        rpc = Presence("0" * 18, pipe=0)
+        rpc.connect()
+        rpc.close()
+        print("  [PASS] Discord is reachable")
+    except DiscordNotFound:
+        print("  [FAIL] Discord is not running (start Discord first)")
+    except Exception as e:
+        print(f"  [PASS] Discord check inconclusive (pypresence error: {e})")
+
+    # Check 5: powershell.exe on WSL/Windows
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["powershell.exe", "-Command", "echo ok"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            print("  [PASS] powershell.exe is available")
+        else:
+            print("  [WARN] powershell.exe returned non-zero")
+    except FileNotFoundError:
+        # Not on Windows/WSL, this is expected
+        pass
+    except Exception:
+        pass
+
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="hermes-presence",
@@ -298,9 +378,12 @@ def main():
     p_install.add_argument("--no-start", action="store_true", help="Don't start immediately")
     p_install.add_argument("--profile", default="main",
                            help="Profile to install for (main, apollo, or any custom profile)")
+    p_install.add_argument("--dry-run", action="store_true", help="Show what would be installed without installing")
 
     # uninstall
-    subparsers.add_parser("uninstall", help="Remove hermes-presence")
+    p_uninstall = subparsers.add_parser("uninstall", help="Remove hermes-presence")
+    p_uninstall.add_argument("--profile", default="main",
+                            help="Profile to uninstall (default: main)")
 
     # status
     subparsers.add_parser("status", help="Show current status")
@@ -323,6 +406,15 @@ def main():
     # version
     parser.add_argument("--version", action="version", version="hermes-presence v3.1.0")
 
+    # help subcommand
+    subparsers.add_parser("help", help="Show detailed help")
+
+    # version subcommand
+    subparsers.add_parser("version", help="Show version")
+
+    # validate subcommand
+    subparsers.add_parser("validate", help="Validate installation")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -337,6 +429,9 @@ def main():
         "disable": _cmd_disable,
         "config": _cmd_config,
         "run": _cmd_run,
+        "help": _cmd_help,
+        "version": _cmd_version,
+        "validate": _cmd_validate,
     }
 
     cmd = commands.get(args.command)

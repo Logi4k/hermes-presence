@@ -16,9 +16,51 @@ from . import PlatformLauncher
 
 
 TASK_NAME = "HermesPresence"
-_APPDATA_FALLBACK = "/mnt/c/Users/logi4k/AppData/Roaming"
-STARTUP_DIR = Path(os.environ.get("APPDATA", _APPDATA_FALLBACK)) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
-MONITOR_TARGET = Path(os.environ.get("APPDATA", _APPDATA_FALLBACK)) / "hermes_presence_monitor.py"
+
+
+def _resolve_appdata() -> str:
+    """Resolve %APPDATA% — works on native Windows, WSL, and remote SSH tunnel."""
+    # 1. Native Windows: %APPDATA% env var is set
+    raw = os.environ.get("APPDATA")
+    if raw and Path(raw).exists():
+        return raw
+
+    # 2. WSL: read the Windows username from /mnt/c/Users, then check AppData
+    try:
+        for entry in sorted(Path("/mnt/c/Users").iterdir()):
+            if entry.is_dir() and not entry.name.startswith("."):
+                candidate = entry / "AppData" / "Roaming"
+                if candidate.exists():
+                    return str(candidate)
+    except Exception:
+        pass
+
+    # 3. Last resort — WSL-side fallback (functional for mirror writes via hook.py)
+    return os.path.expanduser("~/.hermes/state")
+
+
+def _find_windows_username() -> str:
+    """Discover the Windows username from WSL or native env."""
+    userprofile = os.environ.get("USERPROFILE")
+    if userprofile:
+        return Path(userprofile).name
+    # WSL: first directory in /mnt/c/Users that has AppData
+    try:
+        for entry in sorted(Path("/mnt/c/Users").iterdir()):
+            if entry.is_dir() and not entry.name.startswith("."):
+                if (entry / "AppData" / "Roaming").exists():
+                    return entry.name
+    except Exception:
+        pass
+    return os.environ.get("USER", "unknown")
+
+
+_APPDATA = _resolve_appdata()
+STARTUP_DIR = Path(_APPDATA) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+MONITOR_TARGET = Path(_APPDATA) / "hermes_presence_monitor.py"
+
+# Cache for python path discovery
+_CACHED_PYTHON: str | None = None
 
 
 def _wsl_to_win_path(wsl_path: str) -> str:
@@ -69,10 +111,10 @@ class WindowsLauncher(PlatformLauncher):
     def __init__(self, client_id: str, state_file: Path, profile: str = "main"):
         super().__init__(client_id, state_file)
         self.profile = profile
-        # Task name differs for apollo profile
+        # Task name differs for non-main profiles
         self._task_name = "ApolloPresence" if profile == "apollo" else TASK_NAME
-        # Monitor target differs for apollo
-        self._monitor_target = Path(os.environ.get("APPDATA", _APPDATA_FALLBACK)) / (
+        # Monitor target differs for non-main
+        self._monitor_target = Path(_APPDATA) / (
             "apollo_presence_monitor.py" if profile == "apollo" else "hermes_presence_monitor.py"
         )
         self._startup_bat_name = (
@@ -80,24 +122,44 @@ class WindowsLauncher(PlatformLauncher):
         )
 
     def _find_python(self) -> str:
-        """Locate Python on Windows."""
-        candidates = [
-            r"C:\Users\LOGI4K\.hermes\hermes-agent\venv\Scripts\python.exe",
-            r"C:\Python312\python.exe",
-            r"C:\Python311\python.exe",
-        ]
+        """Locate Python on Windows. Uses cached result, then a priority chain:
+        1. Hermes venv (most reliable, has pypresence)
+        2. Active Python3 from PATH (via 'where' / powershell)
+        3. Common install locations
+        4. Bare 'python' fallback (last resort)
+        """
+        global _CACHED_PYTHON
+        if _CACHED_PYTHON:
+            return _CACHED_PYTHON
 
-        # Also try via PowerShell on WSL or 'where' on native Windows
+        candidates: list[str] = []
+
+        # 1. Hermes venv — resolve dynamically
+        username = _find_windows_username()
+        hermes_venv = Path(f"C:\\Users\\{username}\\.hermes\\hermes-agent\\venv\\Scripts\\python.exe")
+        if hermes_venv.exists():
+            candidates.append(str(hermes_venv))
+        # Also try pipx-style install
+        pipx_venv = Path(f"C:\\Users\\{username}\\.hermes\\hermes-agent\\.venv\\Scripts\\python.exe")
+        if pipx_venv.exists():
+            candidates.append(str(pipx_venv))
+
+        # 2. Common install locations
+        for ver in range(13, 8, -1):  # 3.13 down to 3.9
+            for base in [f"C:\\Python3{ver}\\python.exe", f"C:\\Program Files\\Python3{ver}\\python.exe"]:
+                candidates.append(base)
+
+        # 3. System 'where' / PowerShell discovery
         try:
             if _is_wsl():
                 result = subprocess.run(
                     ["powershell.exe", "-Command",
-                     "Get-Command python | Select-Object -ExpandProperty Source"],
+                     "(Get-Command python -ErrorAction SilentlyContinue).Source"],
                     capture_output=True, text=True, timeout=5
                 )
                 for line in result.stdout.splitlines():
                     line = line.strip()
-                    if line and "python" in line.lower():
+                    if line and "python" in line.lower() and line not in candidates:
                         candidates.insert(0, line)
             else:
                 result = subprocess.run(
@@ -106,7 +168,7 @@ class WindowsLauncher(PlatformLauncher):
                 )
                 for line in result.stdout.splitlines():
                     line = line.strip()
-                    if line:
+                    if line and line not in candidates:
                         candidates.insert(0, line)
         except Exception:
             pass
@@ -115,6 +177,7 @@ class WindowsLauncher(PlatformLauncher):
             p = Path(c) if "\\" in c else Path(c.replace("\\", "/"))
             try:
                 if p.exists():
+                    _CACHED_PYTHON = c
                     return c
             except Exception:
                 pass
@@ -280,7 +343,7 @@ start "" /B "{py_path_clean}" "{win_target}"
 def _monitor_script_content(client_id: str, state_file: str, profile: str = "main") -> str:
     mirror_name = "apollo_presence.json" if profile == "apollo" else "hermes_presence.json"
     return f'''"""
-Hermes Presence Monitor v3.2 — Windows auto-start script (multi-pipe).
+Hermes Presence Monitor v3.1.0 — Windows auto-start script (all-pipe).
 Profile: {profile}
 Generated by hermes-presence install --profile {profile}.
 Do not edit manually — run `hermes-presence install` to reconfigure.
@@ -301,7 +364,7 @@ except ImportError:
 
 CLIENT_ID = "{client_id}"
 STATE_FILE = Path(os.environ.get("APPDATA", "")) / "{mirror_name}"
-PIPES = [0, 1, 2, 3]
+PIPES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 # Tool → small_image icon (Discord asset names — must exist in Developer Portal)
 TOOL_ICON_MAP = {{
@@ -407,7 +470,7 @@ def _format_model_label(model, provider):
     return ""
 
 
-print("[MONITOR] Starting Hermes Presence v3.1 (multi-pipe)", flush=True)
+print("[MONITOR] Starting Hermes Presence v3.1.0 (all-pipe)", flush=True)
 print(f"[MONITOR] Client ID: {{CLIENT_ID}}", flush=True)
 print(f"[MONITOR] State file: {{STATE_FILE}}", flush=True)
 
@@ -476,6 +539,7 @@ def shutdown(*args):
 
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
+signal.signal(signal.SIGHUP, shutdown)  # systemd sends SIGHUP before SIGTERM
 
 # Main loop
 no_conn_count = 0  # Watchdog: consecutive iterations with no connections

@@ -3,7 +3,7 @@
 <!-- Badges -->
 ![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![PyPI Version](https://img.shields.io/badge/pypi-v3.1.0-orange)
+![PyPI Version](https://img.shields.io/badge/pypi-coming_soon-orange)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL2-lightgrey)
 
 **Cross-platform Discord Rich Presence for Hermes Agent — one-command install, all OSes supported.**
@@ -130,7 +130,7 @@ All assets should be 512x512 px or smaller (Discord limit: 512KB each).
 
 ```bash
 # Install from GitHub
-pip install git+https://github.com/Logi4k/hermes-presence.git
+pip install git+https://github.com/Logi4k/hermes-presence.git@main
 
 # Run the one-command installer (prompts for Discord Client ID)
 hermes-presence install
@@ -347,7 +347,7 @@ python3 -m venv .venv
 source .venv/bin/activate  # Linux/macOS/WSL
 # .venv\Scripts\activate    # Windows
 
-# Install dev dependencies
+# Install dev dependencies (includes pytest, pytest-asyncio for testing)
 pip install -e ".[dev]"
 
 # Run tests

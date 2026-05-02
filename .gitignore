@@ -40,3 +40,4 @@ hermes_presence_monitor.py
 
 # Python
 *.pyc
+__pycache__/

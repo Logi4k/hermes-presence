@@ -39,7 +39,7 @@ except ImportError:
 
 # ---- Constants ----
 
-PIPES = [0, 1, 2, 3]
+PIPES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 ACTIVITY_MAP = {
     "starting":   ("Launching Hermes", "Starting session..."),
@@ -211,6 +211,7 @@ class UnifiedMonitor:
 
         signal.signal(signal.SIGINT, self._shutdown)
         signal.signal(signal.SIGTERM, self._shutdown)
+        signal.signal(signal.SIGHUP, self._shutdown)
 
     # ---- Connection management ----
 
@@ -302,7 +303,7 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print(f"[start] Hermes Presence Monitor v3.1", flush=True)
+        print(f"[start] Hermes Presence Monitor v3.1.0", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)

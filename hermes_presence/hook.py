@@ -275,7 +275,10 @@ def _mirror_to_windows_if_wsl():
             Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
         )
         # Profile-specific Windows mirror path
-        mirror_name = "apollo_presence.json" if _PROFILE == "apollo" else "hermes_presence.json"
+        if _PROFILE == "main":
+            mirror_name = "hermes_presence.json"
+        else:
+            mirror_name = f"{_PROFILE}_presence.json"
         windows_state = windows_appdata / mirror_name
         windows_state.parent.mkdir(parents=True, exist_ok=True)
 

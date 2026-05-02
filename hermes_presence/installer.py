@@ -55,11 +55,32 @@ def _walk_discord_setup(client_id: Optional[str] = None) -> str:
         print("ERROR: Client ID is required.")
         sys.exit(1)
 
+    # Validate Discord snowflake: 17-20 digits
+    if not cid.isdigit() or not (17 <= len(cid) <= 20):
+        print("ERROR: Client ID must be a numeric Discord snowflake (17-20 digits).")
+        print(f"  You provided: {cid}")
+        sys.exit(1)
+
     # Try to open the developer portal in a browser
     print()
     print("Optional: Upload art assets for better-looking presence.")
     print("  Go to Rich Presence > Art Assets in your Discord app.")
-    print(f"  Upload the 8 PNG files from: {Path(__file__).parent.parent / 'assets'}")
+    # Resolve assets path: prefer importlib.resources (works for pip-installed),
+    # fall back to Path(__file__).parent.parent, then show generic message
+    try:
+        import importlib.resources
+        assets_path = importlib.resources.files('hermes_presence') / 'assets'
+        if assets_path.is_dir():
+            assets_display = str(assets_path)
+        else:
+            raise FileNotFoundError()
+    except Exception:
+        assets_path = Path(__file__).parent.parent / 'assets'
+        if assets_path.is_dir():
+            assets_display = str(assets_path)
+        else:
+            assets_display = "<package assets directory>"
+    print(f"  Upload the 8 PNG files from: {assets_display}")
     print("  Name them: hermes_logo, status_active, status_error, status_idle,")
     print("            status_monitoring, status_researching, status_standby, status_working")
     print()
@@ -115,7 +136,7 @@ def _install_platform(platform: str, client_id: str, state_file: Path, no_start:
         return True
 
     except ImportError as e:
-        print(f"[SKIP] Platform module not available: {e}")
+        print(f"[WARN] Auto-start was not configured: platform module not available ({e})")
         return True
     except Exception as e:
         print(f"[ERROR] Platform setup failed: {e}")
@@ -128,12 +149,13 @@ def install(
     no_start: bool = False,
     config_path: Optional[Path] = None,
     profile: str = "main",
+    dry_run: bool = False,
 ) -> bool:
     """Run the full installation flow.
 
     Returns True if successful, False on critical failure.
     """
-    print(f"Hermes Presence Installer v3.2" + (f" (profile: {profile})" if profile != "main" else ""))
+    print(f"Hermes Presence Installer v3.1.0" + (f" (profile: {profile})" if profile != "main" else ""))
     print("=" * 40)
 
     platform = _detect_platform()
@@ -150,14 +172,22 @@ def install(
     client_id = _walk_discord_setup(client_id)
 
     # Step 2: Save config
-    _install_config(client_id, config_path)
+    if dry_run:
+        print("[DRY RUN] Would save config with client_id")
+    else:
+        _install_config(client_id, config_path)
 
     # Step 3: Platform-specific setup
     state_file = get_state_file_path(profile)
-    platform_ok = _install_platform(platform, client_id, state_file, no_start=no_start, profile=profile)
+    if dry_run:
+        print(f"[DRY RUN] Would install platform auto-start for {platform}")
+        platform_ok = True
+    else:
+        platform_ok = _install_platform(platform, client_id, state_file, no_start=no_start, profile=profile)
 
     # Step 4: Verify state file directory exists
-    state_file.parent.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Step 5: Summary
     print()
@@ -175,16 +205,27 @@ def install(
     print("  hermes-presence config   — Customize display")
     print("  hermes-presence run      — Run in foreground (debug)")
 
+    # Step 6: Check if Discord is running
+    if not dry_run:
+        try:
+            from pypresence import Presence
+            rpc = Presence(0)
+            rpc.connect()
+            rpc.close()
+        except Exception:
+            print()
+            print("WARNING: Discord does not appear to be running. Presence won't show until Discord starts.")
+
     return client_id is not None and bool(client_id.strip())
 
 
-def uninstall() -> bool:
+def uninstall(profile: str = "main") -> bool:
     """Remove hermes-presence auto-start and config."""
     print("Hermes Presence Uninstaller")
     print("=" * 40)
 
     platform = _detect_platform()
-    state_file = get_state_file_path()
+    state_file = get_state_file_path(profile)
 
     # Stop and remove platform-specific setup
     try:
@@ -196,7 +237,7 @@ def uninstall() -> bool:
             launcher = MacOSLauncher("", state_file)
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
-            launcher = WindowsLauncher("", state_file)
+            launcher = WindowsLauncher("", state_file, profile=profile)
         else:
             launcher = None
 

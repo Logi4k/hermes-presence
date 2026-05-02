@@ -7,12 +7,12 @@ Loads: launchctl load ~/Library/LaunchAgents/com.hermes.presence.plist
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from . import PlatformLauncher
 
 
-PLIST_LABEL = "com.hermes.presence"
-PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{PLIST_LABEL}.plist"
+PLIST_LABEL_BASE = "com.hermes.presence"
 
 PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -33,6 +33,8 @@ PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
         <string>{client_id}</string>
         <key>HERMES_PRESENCE_STATE</key>
         <string>{state_file}</string>
+        <key>HERMES_PROFILE</key>
+        <string>{profile}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -50,19 +52,19 @@ PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 class MacOSLauncher(PlatformLauncher):
     """launchd plist launcher."""
 
-    def _python_path(self) -> str:
-        for candidate in [
-            os.environ.get("VIRTUAL_ENV", ""),
-            Path.home() / ".hermes" / "hermes-agent" / "venv",
-        ]:
-            if candidate and Path(candidate).exists():
-                py = Path(candidate) / "bin" / "python3"
-                if py.exists():
-                    return str(py)
-                py = Path(candidate) / "bin" / "python"
-                if py.exists():
-                    return str(py)
-        return "/usr/bin/python3"
+    def __init__(self, client_id: str, state_file: str, profile: str = "main"):
+        super().__init__(client_id, state_file)
+        self.profile = profile
+
+    @property
+    def _label(self) -> str:
+        if self.profile == "main":
+            return PLIST_LABEL_BASE
+        return f"{PLIST_LABEL_BASE}.{self.profile}"
+
+    @property
+    def _plist_path(self) -> Path:
+        return Path.home() / "Library" / "LaunchAgents" / f"{self._label}.plist"
 
     @property
     def _log_dir(self) -> Path:
@@ -70,22 +72,39 @@ class MacOSLauncher(PlatformLauncher):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def _python_path(self) -> str:
+        """Find the Python interpreter to use."""
+        # 1. Current Python executable
+        if sys.executable:
+            return sys.executable
+        # 2. hermes-agent venv
+        venv_py = Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python3"
+        if venv_py.exists():
+            return str(venv_py)
+        # 3. which python3
+        result = subprocess.run(["which", "python3"], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        # 4. Fallback
+        return "/usr/bin/python3"
+
     def install(self) -> bool:
-        PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self._plist_path.parent.mkdir(parents=True, exist_ok=True)
 
         plist = PLIST_TEMPLATE.format(
-            label=PLIST_LABEL,
+            label=self._label,
             python_path=self._python_path(),
             client_id=self.client_id,
             state_file=self.state_file,
+            profile=self.profile,
             log_dir=self._log_dir,
         )
 
-        PLIST_PATH.write_text(plist)
+        self._plist_path.write_text(plist)
 
         try:
             subprocess.run(
-                ["launchctl", "load", str(PLIST_PATH)],
+                ["launchctl", "load", str(self._plist_path)],
                 capture_output=True, timeout=10
             )
             return True
@@ -95,22 +114,22 @@ class MacOSLauncher(PlatformLauncher):
     def uninstall(self) -> bool:
         try:
             subprocess.run(
-                ["launchctl", "unload", str(PLIST_PATH)],
+                ["launchctl", "unload", str(self._plist_path)],
                 capture_output=True, timeout=10
             )
         except Exception:
             pass
 
-        PLIST_PATH.unlink(missing_ok=True)
-        return not PLIST_PATH.exists()
+        self._plist_path.unlink(missing_ok=True)
+        return not self._plist_path.exists()
 
     def is_installed(self) -> bool:
-        return PLIST_PATH.exists()
+        return self._plist_path.exists()
 
     def start(self) -> bool:
         try:
             subprocess.run(
-                ["launchctl", "start", PLIST_LABEL],
+                ["launchctl", "start", self._label],
                 capture_output=True, timeout=10
             )
             return True
@@ -120,7 +139,7 @@ class MacOSLauncher(PlatformLauncher):
     def stop(self) -> bool:
         try:
             subprocess.run(
-                ["launchctl", "stop", PLIST_LABEL],
+                ["launchctl", "stop", self._label],
                 capture_output=True, timeout=10
             )
             return True
@@ -132,7 +151,7 @@ class MacOSLauncher(PlatformLauncher):
         pid = None
         try:
             result = subprocess.run(
-                ["launchctl", "list", PLIST_LABEL],
+                ["launchctl", "list", self._label],
                 capture_output=True, text=True, timeout=5
             )
             # Output: {"PID" = 12345; ...} or "Could not find service"

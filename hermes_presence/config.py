@@ -226,6 +226,12 @@ def _write_toml(d: dict, path: Path):
                     else:
                         items.append(str(item))
                 lines.append(f"{k} = [{', '.join(items)}]")
+            elif isinstance(v, dict):
+                inner = ", ".join(
+                    f'{ik} = "{iv}"' if isinstance(iv, str) else f'{ik} = {iv}'
+                    for ik, iv in v.items()
+                )
+                lines.append(f"{{ {inner} }}")
             else:
                 lines.append(f"{k} = {v}")
         lines.append("")
@@ -234,8 +240,12 @@ def _write_toml(d: dict, path: Path):
     if lines and lines[-1] == "":
         lines.pop()
 
+    content = "\n".join(lines)
+    if not content.endswith("\n"):
+        content += "\n"
+
     with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write(content)
 
 
 def save_config(config: PresenceConfig, config_path: Optional[Path] = None):
@@ -323,3 +333,46 @@ def get_mirror_path() -> Optional[Path]:
     if windows_user:
         return Path(f"/mnt/c/Users/{windows_user}/AppData/Roaming/hermes_presence.json")
     return None
+
+
+def verify_config(config_path: Optional[Path] = None) -> bool:
+    """Read back the config file and validate basic invariants.
+
+    Prints warnings for issues but does not raise. Returns True if no
+    warnings were emitted.
+    """
+    path = config_path or DEFAULT_CONFIG_PATH
+    ok = True
+
+    if not path.exists():
+        print(f"[WARN] Config file not found: {path}", file=sys.stderr)
+        return False
+
+    try:
+        config = load_config(path)
+    except Exception as e:
+        print(f"[WARN] Could not load config from {path}: {e}", file=sys.stderr)
+        return False
+
+    # client_id must be non-empty
+    if not config.discord.client_id:
+        print("[WARN] discord.client_id is empty — set a Discord application client ID", file=sys.stderr)
+        ok = False
+
+    # state_file_path must exist or its parent dir must be writable
+    state_file_path = get_state_file_path()
+    if not state_file_path.exists():
+        parent = state_file_path.parent
+        if not parent.exists():
+            if os.access(os.getcwd(), os.W_OK):
+                print(f"[WARN] State file directory {parent} does not exist; it will be created on first run", file=sys.stderr)
+        elif not os.access(parent, os.W_OK):
+            print(f"[WARN] State file parent directory {parent} is not writable", file=sys.stderr)
+            ok = False
+
+    # poll_interval must be > 0
+    if config.advanced.poll_interval <= 0:
+        print("[WARN] advanced.poll_interval must be > 0", file=sys.stderr)
+        ok = False
+
+    return ok
