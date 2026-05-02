@@ -23,9 +23,13 @@ from typing import Optional
 # State file contract — this is the format the standalone app reads.
 # Keep it stable. Add fields, never remove or rename existing ones.
 
-PRESENCE_VERSION = 1
+PRESENCE_VERSION = 2
 
 STATE_FILE = Path.home() / ".hermes" / "state" / "presence.json"
+
+# Tools that spawn sub-agents — increment/decrement subagent counter
+SUBAGENT_TOOLS = {"delegate_task", "delegate_tasks"}
+
 
 def _resolve_windows_state_file() -> Optional[Path]:
     """Resolve the Windows-accessible state file path when running in WSL2.
@@ -52,6 +56,7 @@ class PresenceWriter:
         source: str = "cli",
         model: str = "",
         provider: str = "",
+        profile: str = "main",
     ):
         self._state_file = state_file or STATE_FILE
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -61,12 +66,15 @@ class PresenceWriter:
         self._source = source
         self._model = model
         self._provider = provider
+        self._profile = profile
         self._started_at = datetime.now(timezone.utc).isoformat()
         self._tool_calls_count = 0
         self._current_tool: Optional[str] = None
         self._last_detail: str = ""
         self._last_activity = self._started_at
         self._idle_since: Optional[float] = None
+        self._subagent_count = 0
+        self._tool_started_at: Optional[str] = None  # ISO timestamp when current tool started
 
         # Write initial state
         self._write_state(activity_state="starting")
@@ -76,6 +84,7 @@ class PresenceWriter:
         state = {
             "version": PRESENCE_VERSION,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "profile": self._profile,
             "session": {
                 "id": self._session_id,
                 "source": self._source,
@@ -83,12 +92,14 @@ class PresenceWriter:
                 "model": self._model,
                 "provider": self._provider,
                 "tool_calls_count": self._tool_calls_count,
+                "subagent_count": self._subagent_count,
             },
             "activity": {
                 "state": activity_state,
                 "detail": detail or self._last_detail or self._current_tool or "",
                 "tool": self._current_tool,
                 "idle_seconds": self._idle_seconds(),
+                "tool_started_at": self._tool_started_at,
             },
         }
 
@@ -122,17 +133,30 @@ class PresenceWriter:
         with self._lock:
             self._current_tool = tool_name
             self._idle_since = None
+            self._tool_started_at = datetime.now(timezone.utc).isoformat()
             detail = _format_tool_detail(tool_name, tool_args)
             self._last_detail = detail
+
+            # Track sub-agent spawns
+            if tool_name in SUBAGENT_TOOLS:
+                self._subagent_count += 1
+
             self._write_state("working", detail)
 
     def on_tool_complete(self, tool_call_id: str, tool_name: str, tool_args: dict, result: str):
         """Called when a tool finishes execution."""
         with self._lock:
             self._tool_calls_count += 1
+            previous_tool = self._current_tool
             self._current_tool = None
             self._last_activity = datetime.now(timezone.utc).isoformat()
             self._idle_since = time.time()
+            self._tool_started_at = None
+
+            # Sub-agents complete when delegate_task returns
+            if previous_tool in SUBAGENT_TOOLS:
+                self._subagent_count = max(0, self._subagent_count - 1)
+
             # Keep _last_detail so thinking state shows what just finished
             self._write_state("thinking")
 
@@ -140,6 +164,7 @@ class PresenceWriter:
         """Called when the user sends a message (Hermes starts thinking)."""
         with self._lock:
             self._idle_since = None
+            self._tool_started_at = None
             self._write_state("thinking")
 
     def on_idle(self):
@@ -192,10 +217,18 @@ def _format_tool_detail(tool_name: str, args: dict = None) -> str:
     elif tool_name == "browser_navigate":
         url = args.get("url", "")[:50]
         return f"Browsing: {url}"
-    elif tool_name == "delegate_task":
+    elif tool_name in ("delegate_task", "delegate_tasks"):
         goal = (args.get("goal") or "")[:60]
         return f"Delegating: {goal}"
     elif tool_name == "execute_code":
         return "Executing Python..."
+    elif tool_name == "send_message":
+        target = args.get("target", "")[:40]
+        return f"Messaging: {target}"
+    elif tool_name == "memory":
+        return "Saving to memory..."
+    elif tool_name == "skill_view":
+        name = args.get("name", "")[:40]
+        return f"Loading skill: {name}"
     else:
         return f"Running {tool_name}..."
