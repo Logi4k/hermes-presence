@@ -539,7 +539,8 @@ def shutdown(*args):
 
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
-signal.signal(signal.SIGHUP, shutdown)  # systemd sends SIGHUP before SIGTERM
+if hasattr(signal, 'SIGHUP'):  # Unix only — no-op on Windows
+    signal.signal(signal.SIGHUP, shutdown)  # systemd sends SIGHUP before SIGTERM
 
 # Main loop
 no_conn_count = 0  # Watchdog: consecutive iterations with no connections
