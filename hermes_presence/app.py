@@ -1,242 +1,336 @@
 """
-Standalone Discord Rich Presence app for Hermes Agent.
-
-Reads presence state from ~/.hermes/state/presence.json (written by Hermes)
-and pushes activity to Discord via pypresence.
-
-Cross-platform: works on Linux, macOS, Windows, and WSL2.
+CLI entry point for hermes-presence.
 
 Usage:
-    python -m hermes_presence.app
+    hermes-presence install        # Full setup wizard
+    hermes-presence uninstall      # Remove everything
+    hermes-presence status         # Show current state
+    hermes-presence enable         # Re-enable after disable
+    hermes-presence disable        # Temporarily disable
+    hermes-presence config         # Show current config
+    hermes-presence config set <key> <value>  # Update config
+    hermes-presence run            # Run monitor in foreground (debug)
 
-Requirements:
-    pip install pypresence
+Environment variables:
+    HERMES_DISCORD_CLIENT_ID       # Override client ID
+    HERMES_PRESENCE_STATE          # Override state file path
 """
 
-import json
+import argparse
 import os
-import signal
 import sys
-import time
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
-try:
-    from pypresence import Presence, DiscordNotFound, PipeClosed
-except ImportError:
-    print("ERROR: pypresence not installed. Run: pip install pypresence")
-    sys.exit(1)
 
 
-# ── Configuration ──────────────────────────────────────────────────────────
+def _cmd_install(args):
+    """Install hermes-presence (one-command setup)."""
+    from .installer import install
 
-# You MUST set this to your Discord Application's Client ID.
-# Get one at: https://discord.com/developers/applications
-DISCORD_CLIENT_ID = os.environ.get("HERMES_DISCORD_CLIENT_ID", "")
+    success = install(
+        client_id=args.client_id,
+        force=args.force,
+        no_start=args.no_start,
+    )
 
-STATE_FILE = Path(os.environ.get("HERMES_PRESENCE_STATE",
-    str(Path.home() / ".hermes" / "state" / "presence.json")))
-POLL_INTERVAL = 5  # seconds between file checks
-IDLE_TIMEOUT = 60  # seconds before showing as idle
-
-
-# ── Discord Rich Presence ──────────────────────────────────────────────────
-
-# Map of state -> Discord presence fields
-# Format: (state_text, details_template, large_image, small_image)
-ACTIVITY_MAP = {
-    "starting":   ("Launching Hermes", "Starting session...", "hermes_logo", None),
-    "thinking":   ("Thinking", "Processing...", "hermes_logo", None),
-    "working":    ("Working", "{detail}", "hermes_logo", "status_working"),
-    "idle":       ("Idle", "Waiting for input", "hermes_logo", "status_idle"),
-    "error":      ("Error", "{detail}", "hermes_logo", "status_error"),
-    "offline":    ("Offline", "Session ended", "hermes_logo", None),
-}
-
-# Tool-specific images for richer display
-TOOL_IMAGES = {
-    "terminal":       "status_working",
-    "web_search":     "status_researching",
-    "web_extract":    "status_researching",
-    "read_file":      "status_working",
-    "write_file":     "status_working",
-    "patch":          "status_working",
-    "browser_navigate": "status_researching",
-    "delegate_task":  "status_working",
-    "execute_code":   "status_working",
-    "session_search": "status_researching",
-    "memory":         "status_working",
-}
-
-
-class HermesPresence:
-    """Manages Discord Rich Presence for a Hermes session."""
-
-    def __init__(self, client_id: str):
-        if not client_id:
-            raise ValueError(
-                "Discord Client ID is required. "
-                "Set HERMES_DISCORD_CLIENT_ID env var or pass client_id=."
-            )
-        self.client_id = client_id
-        self.rpc: Optional[Presence] = None
-        self._last_state_hash: str = ""
-        self._connected = False
-
-    def connect(self) -> bool:
-        """Connect to Discord. Retries silently."""
-        try:
-            self.rpc = Presence(self.client_id)
-            self.rpc.connect()
-            self._connected = True
-            return True
-        except DiscordNotFound:
-            return False
-        except Exception as e:
-            print(f"Discord connection error: {e}")
-            return False
-
-    def disconnect(self):
-        """Clean shutdown."""
-        if self.rpc:
-            try:
-                self.rpc.close()
-            except Exception:
-                pass
-            self.rpc = None
-        self._connected = False
-
-    def update(self, state: dict) -> bool:
-        """Push presence state to Discord. Returns True if updated."""
-        activity_state = state["activity"]["state"]
-        detail = state["activity"]["detail"]
-        tool = state["activity"].get("tool")
-        session = state["session"]
-
-        # Get activity template
-        template = ACTIVITY_MAP.get(activity_state)
-        if not template:
-            return False
-
-        state_text, details_template, large_image, small_image = template
-
-        # Fill in detail
-        details = details_template.format(detail=detail) if "{detail}" in details_template else details_template
-
-        # Pick tool-specific small image
-        if tool and tool in TOOL_IMAGES:
-            small_image = TOOL_IMAGES[tool]
-
-        # Build a hash to avoid redundant updates
-        new_hash = f"{state_text}|{details}|{small_image}|{session['tool_calls_count']}"
-        if new_hash == self._last_state_hash:
-            return False
-        self._last_state_hash = new_hash
-
-        if not self._connected:
-            return False
-
-        try:
-            self.rpc.update(
-                state=state_text,
-                details=details,
-                large_image=large_image or "hermes_logo",
-                large_text=f"Hermes Agent — {session['model'] or 'AI'}",
-                small_image=small_image,
-                small_text=tool or activity_state,
-                start=int(datetime.fromisoformat(session["started_at"]).timestamp()),
-                buttons=[
-                    {"label": "Learn about Hermes", "url": "https://github.com/nousresearch/hermes-agent"}
-                ],
-            )
-            return True
-        except (PipeClosed, ConnectionError):
-            self._connected = False
-            return False
-        except Exception as e:
-            print(f"RPC update error: {e}")
-            return False
-
-    def clear(self):
-        """Clear Discord presence."""
-        if self.rpc and self._connected:
-            try:
-                self.rpc.clear()
-            except Exception:
-                pass
-
-
-# ── State file reader ─────────────────────────────────────────────────────
-
-def read_state() -> Optional[dict]:
-    """Read and parse the presence state file."""
-    if not STATE_FILE.exists():
-        return None
-    try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-# ── Main loop ─────────────────────────────────────────────────────────────
-
-def main():
-    client_id = DISCORD_CLIENT_ID
-    if not client_id:
-        print("ERROR: DISCORD_CLIENT_ID not set.")
-        print("  1. Visit https://discord.com/developers/applications")
-        print("  2. Create an application named 'Hermes AI'")
-        print("  3. Copy the Application ID")
-        print("  4. Set: export HERMES_DISCORD_CLIENT_ID=<your-id>")
-        print("     or pass: python -m hermes_presence.app <client-id>")
+    if success:
+        print("\n[DONE] Hermes Presence installed successfully!")
+        print("  Discord should now show your Hermes activity.")
+        print("  Run 'hermes-presence status' to verify.")
+        print("\n  Customize: hermes-presence config set display.show_provider false")
+        print("  Disable:   hermes-presence disable")
+        print("  Uninstall: hermes-presence uninstall")
+    else:
+        print("\n[FAIL] Installation encountered errors. Check messages above.")
         sys.exit(1)
 
-    presence = HermesPresence(client_id)
-    running = True
 
-    def _shutdown(signum=None, frame=None):
-        nonlocal running
-        running = False
+def _cmd_uninstall(args):
+    """Remove hermes-presence."""
+    from .installer import uninstall
 
-    signal.signal(signal.SIGINT, _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
+    success = uninstall()
+    if success:
+        print("\n[DONE] Hermes Presence removed.")
+    else:
+        print("\n[FAIL] Uninstall had errors (may already be removed).")
+        sys.exit(1)
 
-    print(f"Hermes Presence v0.1.0")
-    print(f"  State file: {STATE_FILE}")
-    print(f"  Poll interval: {POLL_INTERVAL}s")
-    print(f"  Connecting to Discord...")
 
-    # Connect loop — retry every 5s until connected
-    while running and not presence._connected:
-        if presence.connect():
-            print("  Connected to Discord ✓")
+def _cmd_status(args):
+    """Show current status."""
+    from .config import load_config, is_disabled, get_state_file_path
+
+    cfg = load_config()
+    state_file = get_state_file_path()
+
+    print("Hermes Presence Status")
+    print("=" * 50)
+    print(f"  Client ID:      {'[SET]' if cfg.discord.client_id else '[NOT SET]'}")
+    print(f"  State file:     {state_file}")
+    print(f"  Disabled:       {'Yes' if is_disabled() else 'No'}")
+    print(f"  Idle timeout:   {cfg.display.idle_timeout}s")
+    print(f"  Show model:     {cfg.display.show_model}")
+    print(f"  Show provider:  {cfg.display.show_provider}")
+    print(f"  Poll interval:  {cfg.advanced.poll_interval}s")
+    if cfg.tools.exclude:
+        print(f"  Excluded tools: {', '.join(cfg.tools.exclude)}")
+    print()
+
+    # Platform-specific status
+    from .installer import _detect_platform
+    platform = _detect_platform()
+
+    try:
+        if platform == "linux":
+            from .platforms.linux import LinuxLauncher
+            launcher = LinuxLauncher(cfg.discord.client_id, state_file)
+        elif platform == "macos":
+            from .platforms.macos import MacOSLauncher
+            launcher = MacOSLauncher(cfg.discord.client_id, state_file)
+        elif platform in ("windows", "wsl2"):
+            from .platforms.windows import WindowsLauncher
+            launcher = WindowsLauncher(cfg.discord.client_id, state_file)
         else:
-            print("  Discord not running — retrying in 5s...")
-            for _ in range(5):
-                if not running:
-                    break
-                time.sleep(1)
+            launcher = None
 
-    # Main poll loop
-    while running:
-        state = read_state()
+        if launcher:
+            s = launcher.status()
+            print("Service Status")
+            print("-" * 40)
+            print(f"  Running:     {'Yes' if s.get('running') else 'No'}")
+            print(f"  Auto-start:  {'Yes' if s.get('auto_start') else 'No'}")
+            if s.get('pid'):
+                print(f"  PID:         {s['pid']}")
+            print()
+    except ImportError:
+        print("(Platform service status unavailable)")
+        print()
 
-        if state:
-            presence.update(state)
-        else:
-            presence.clear()
+    if state_file.exists():
+        import json
+        from datetime import datetime
 
-        time.sleep(POLL_INTERVAL)
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        act = data.get("activity", {})
+        sess = data.get("session", {})
 
-    presence.clear()
-    presence.disconnect()
-    print("Shutdown complete.")
+        print("Current Activity (from state file)")
+        print("-" * 40)
+        print(f"  State:        {act.get('state', 'unknown')}")
+        print(f"  Tool:         {act.get('tool') or '(none)'}")
+        print(f"  Detail:       {act.get('detail', '')[:80]}")
+        print(f"  Model:        {sess.get('model', '?')}")
+        print(f"  Provider:     {sess.get('provider', '?')}")
+        print(f"  Tool calls:   {sess.get('tool_calls_count', 0)}")
+        print(f"  Sub-agents:   {sess.get('subagent_count', 0)}")
+        print(f"  Files mod'd:  {sess.get('files_modified', 0)}")
+        print(f"  Cost:         ${sess.get('cost_usd', 0):.4f}")
+
+        ts = data.get("timestamp", "")
+        if ts:
+            try:
+                dt = datetime.fromisoformat(ts)
+                print(f"  Last update:  {dt.strftime('%H:%M:%S')}")
+            except Exception:
+                pass
+        print()
+
+
+def _cmd_enable(args):
+    """Re-enable presence after disable."""
+    from .config import set_disabled
+
+    set_disabled(False)
+    print("Hermes Presence enabled.")
+    print("Run 'hermes-presence install' if the monitor isn't running.")
+
+
+def _cmd_disable(args):
+    """Temporarily disable presence."""
+    from .config import set_disabled
+
+    set_disabled(True)
+    print("Hermes Presence disabled.")
+    print("Run 'hermes-presence enable' to re-enable.")
+
+
+def _cmd_config(args):
+    """Show or update config."""
+    from .config import load_config, save_config, DEFAULT_CONFIG_PATH
+
+    a = args.args or []
+
+    # Parse: ['show'] → show, ['set', 'key', 'value'] → set, ['key', 'value'] → set
+    if not a or a == ["show"]:
+        # Show config
+        cfg = load_config()
+        print("Current configuration:")
+        print(f"  discord.client_id     = {cfg.discord.client_id or '(not set)'}")
+        print(f"  display.show_model    = {cfg.display.show_model}")
+        print(f"  display.show_provider = {cfg.display.show_provider}")
+        print(f"  display.idle_timeout  = {cfg.display.idle_timeout}s")
+        print(f"  display.large_image   = {cfg.display.large_image}")
+        print(f"  display.large_text    = {cfg.display.large_text}")
+        print(f"  advanced.poll_interval = {cfg.advanced.poll_interval}s")
+        print(f"  tools.exclude         = {cfg.tools.exclude or '(none)'}")
+        print(f"  buttons.hermes_github = {cfg.buttons.hermes_github}")
+        print(f"  buttons.nexus_dashboard = {cfg.buttons.nexus_dashboard}")
+        print()
+        print(f"Config file: {DEFAULT_CONFIG_PATH}")
+        if not DEFAULT_CONFIG_PATH.exists():
+            print("  (no config file found — using defaults and env vars)")
+        return
+
+    # Determine key and value
+    if a[0] == "set":
+        if len(a) < 3:
+            print("ERROR: 'config set' requires key and value")
+            print("  Usage: hermes-presence config set <key> <value>")
+            sys.exit(1)
+        key = a[1]
+        value = a[2]
+    else:
+        if len(a) < 2:
+            print("ERROR: Config requires key and value")
+            print("  Usage: hermes-presence config <key> <value>")
+            sys.exit(1)
+        key = a[0]
+        value = a[1]
+
+    # Set config
+    cfg = load_config()
+
+    # Navigate the dotted key path
+    parts = key.split(".")
+    if len(parts) < 2:
+        print(f"ERROR: Config keys must be in format 'section.key' (e.g. 'discord.client_id')")
+        sys.exit(1)
+
+    section, field = parts[0], parts[1]
+
+    # Convert value to appropriate type
+    if field in ("exclude", "custom_urls"):
+        value = value.split(",") if value else []
+    elif field in ("show_model", "show_provider", "force_windows_ipc",
+                   "state_file_mirror", "hermes_github", "nexus_dashboard"):
+        value = value.lower() in ("true", "yes", "1", "on")
+    elif field in ("idle_timeout", "poll_interval", "pipe_connect_retry"):
+        value = int(value)
+
+    if section == "discord" and field == "client_id":
+        cfg.discord.client_id = value
+    elif section == "display":
+        setattr(cfg.display, field, value)
+    elif section == "windows":
+        setattr(cfg.windows, field, value)
+    elif section == "tools" and field == "exclude":
+        cfg.tools.exclude = value if isinstance(value, list) else [value]
+    elif section == "buttons":
+        setattr(cfg.buttons, field, value)
+    elif section == "advanced":
+        setattr(cfg.advanced, field, value)
+    else:
+        print(f"ERROR: Unknown config key: {key}")
+        print("  Valid sections: discord, display, windows, tools, buttons, advanced")
+        sys.exit(1)
+
+    save_config(cfg)
+    print(f"Config saved: {key} = {value}")
+    print(f"File: {DEFAULT_CONFIG_PATH}")
+
+
+def _cmd_run(args):
+    """Run the monitor in foreground (debug mode)."""
+    from .config import load_config, get_state_file_path
+    from .monitor import UnifiedMonitor
+
+    cfg = load_config()
+
+    if not cfg.discord.client_id:
+        print("ERROR: Discord Client ID is not set.")
+        print("  Set it: hermes-presence config set discord.client_id YOUR_CLIENT_ID")
+        print("  Or:     export HERMES_DISCORD_CLIENT_ID=YOUR_CLIENT_ID")
+        sys.exit(1)
+
+    monitor = UnifiedMonitor(
+        client_id=cfg.discord.client_id,
+        state_file=get_state_file_path(),
+        exclude_tools=cfg.tools.exclude,
+        idle_timeout=cfg.display.idle_timeout,
+        show_model=cfg.display.show_model,
+        show_provider=cfg.display.show_provider,
+        poll_interval=cfg.advanced.poll_interval,
+        pipe_connect_retry=cfg.advanced.pipe_connect_retry,
+        large_image=cfg.display.large_image,
+        large_text=cfg.display.large_text,
+        show_hermes_button=cfg.buttons.hermes_github,
+        show_nexus_button=cfg.buttons.nexus_dashboard,
+        custom_buttons=cfg.buttons.custom_urls,
+    )
+
+    try:
+        monitor.run()
+    except KeyboardInterrupt:
+        print("\n[stop] Interrupted by user", flush=True)
+        monitor._shutdown()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="hermes-presence",
+        description="Cross-platform Discord Rich Presence for Hermes Agent",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="Command")
+
+    # install
+    p_install = subparsers.add_parser("install", help="Full one-command setup")
+    p_install.add_argument("--client-id", help="Discord Application Client ID")
+    p_install.add_argument("--force", action="store_true", help="Force reinstall")
+    p_install.add_argument("--no-start", action="store_true", help="Don't start immediately")
+
+    # uninstall
+    subparsers.add_parser("uninstall", help="Remove hermes-presence")
+
+    # status
+    subparsers.add_parser("status", help="Show current status")
+
+    # enable / disable
+    subparsers.add_parser("enable", help="Re-enable after disable")
+    subparsers.add_parser("disable", help="Temporarily disable presence")
+
+    # config
+    p_config = subparsers.add_parser("config", help="Show or update configuration")
+    p_config.add_argument("args", nargs="*", help="[set] <key> <value> | <key> <value> | 'show'")
+
+    # run
+    subparsers.add_parser("run", help="Run monitor in foreground (debug)")
+
+    # version
+    parser.add_argument("--version", action="version", version="hermes-presence v3.0.0")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(0)
+
+    commands = {
+        "install": _cmd_install,
+        "uninstall": _cmd_uninstall,
+        "status": _cmd_status,
+        "enable": _cmd_enable,
+        "disable": _cmd_disable,
+        "config": _cmd_config,
+        "run": _cmd_run,
+    }
+
+    cmd = commands.get(args.command)
+    if cmd:
+        cmd(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
-    # Accept client ID as CLI arg
-    if len(sys.argv) > 1:
-        DISCORD_CLIENT_ID = sys.argv[1]
     main()
