@@ -1,135 +1,348 @@
 """
-Hermes hook — one-liner to enable Discord Rich Presence.
+Hermes CLI hook for Discord Rich Presence.
 
-Add this line after AIAgent initialization in cli.py (around line 3606):
+Integrates with Hermes event system to write presence state
+at every tool call. Enhanced for v3.0 with:
+- Model/provider detection
+- Error state callbacks
+- Thinking/streaming indicator
+- Cron job detection
+- Orchestrator detection
+- Kanban phase tracking
+- WSL-to-Windows state mirroring
 
-    from hermes_presence.hook import setup_presence
-    _presence = setup_presence(agent, model=..., provider=..., source="cli")
-
-Or use the lazy auto-detect version (recommended):
-    from hermes_presence.hook import auto_setup
-    _presence = auto_setup(agent)
-
-For clinical-monitor profile:
-    _presence = auto_setup(agent, profile="clinical")
-    # This writes to ~/.hermes/state/presence-clinical.json
+Install: `hermes plugin add hermes-presence`
+Or manual: add hook to config.yaml
 """
 
-import logging
 import os
+import sys
 from pathlib import Path
+from typing import Optional
 
-logger = logging.getLogger(__name__)
+from .config import is_disabled, load_config
+from .writer import get_writer
+
+# Check for cron markers
+_IS_CRON = any(
+    os.environ.get(v, "").strip() for v in [
+        "HERMES_CRON_JOB_ID",
+        "CRON_JOB_ID",
+        "HERMES_SCHEDULED",
+    ]
+)
+
+# Check for orchestrator
+_IS_ORCHESTRATOR = os.environ.get("HERMES_ORCHESTRATOR", "").strip() == "1"
+
+# Check for profile
+_PROFILE = os.environ.get("HERMES_PROFILE", "main")
 
 
-def _auto_detect_wsl():
-    """Detect WSL2 and set WINDOWS_USER env var for cross-filesystem state output."""
-    if os.environ.get("WINDOWS_USER"):
-        return  # Already set
+def on_session_start(context: dict):
+    """
+    Called when a Hermes conversation session starts (or user sends first message).
+
+    context contains:
+        model: str        - model name (e.g., "deepseek-v4-pro")
+        provider: str     - provider name (e.g., "deepseek")
+        profile: str      - Hermes profile name
+        thinking: bool    - whether model is streaming
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+
+    model = context.get("model", os.environ.get("HERMES_MODEL", "unknown"))
+    provider = context.get("provider", os.environ.get("HERMES_PROVIDER", "unknown"))
+    thinking = context.get("thinking", False)
+
+    writer.set_session(
+        model=model,
+        provider=provider,
+        thinking=thinking,
+        is_cron=_IS_CRON,
+        is_orchestrator=_IS_ORCHESTRATOR,
+        profile=_PROFILE,
+    )
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_tool_start(context: dict):
+    """
+    Called when a tool execution begins.
+
+    context contains:
+        tool_name: str
+        params: dict
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+
+    tool_name = context.get("tool_name", "unknown")
+    params = context.get("params", {})
+
+    writer.tool_call(tool_name, params)
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_tool_end(context: dict):
+    """
+    Called when a tool execution completes.
+    Returns to idle if no other tool is active.
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+
+    # If successful, go back to idle
+    error = context.get("error")
+    if error:
+        error_msg = str(error)[:100] if error else "Tool error"
+        writer.error(error_msg)
+    else:
+        writer.idle()
+
+    # Track files modified
+    tool_name = context.get("tool_name", "")
+    if tool_name in ("write_file", "patch", "skill_manage"):
+        writer.file_modified()
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_tool_error(context: dict):
+    """
+    Called when a tool execution fails with an error.
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+
+    error_msg = str(context.get("error", "") or "Unknown error")[:100]
+    writer.error(error_msg)
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_thinking(context: dict):
+    """
+    Called when the model begins streaming/thinking.
+
+    This is triggered during the generation phase before the
+    assistant's response is sent.
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+    writer.thinking()
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_model_info(context: dict):
+    """
+    Called when model/provider info becomes available.
+
+    context contains:
+        model: str
+        provider: str
+        cost_usd: float (optional)
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+
+    model = context.get("model", "")
+    provider = context.get("provider", "")
+    cost = context.get("cost_usd")
+
+    if model or provider:
+        writer.set_session(
+            model=model or writer._current_model,
+            provider=provider or writer._current_provider,
+            is_cron=_IS_CRON,
+            is_orchestrator=_IS_ORCHESTRATOR,
+        )
+
+    if cost is not None:
+        writer.add_cost(cost)
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_subagent_change(context: dict):
+    """
+    Called when sub-agent count changes (spawned or completed).
+
+    context contains:
+        count: int      - current subagent count
+        delta: int      - change (+1 for spawn, -1 for complete)
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+
+    count = context.get("count", 0)
+    writer.set_subagent_count(count)
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_kanban_phase(context: dict):
+    """
+    Called when the kanban phase changes.
+
+    context contains:
+        phase: str | None   - current phase or None to clear
+    """
+    if is_disabled():
+        return
+
+    writer = get_writer()
+
+    phase = context.get("phase")
+    writer.set_kanban(phase)
+
+    _mirror_to_windows_if_wsl()
+
+
+def on_session_end(context: dict):
+    """
+    Called when the session ends.
+    """
+    writer = get_writer()
+    writer.idle()
+    _mirror_to_windows_if_wsl()
+
+
+def on_shutdown(context: dict):
+    """
+    Called when Hermes shuts down.
+    """
+    writer = get_writer()
+    writer.shutdown()
+    _mirror_to_windows_if_wsl()
+
+
+# --- WSL to Windows Bridge ---
+
+def _mirror_to_windows_if_wsl():
+    """Mirror state file to Windows side if running on WSL."""
+    if not _is_wsl():
+        return
+
     try:
-        with open("/proc/version", "r") as f:
-            content = f.read().lower()
-            if "microsoft" in content or "wsl" in content:
-                # Running in WSL — discover Windows username from /mnt/c/Users/
-                users_dir = "/mnt/c/Users"
-                if os.path.isdir(users_dir):
-                    for name in os.listdir(users_dir):
-                        user_path = os.path.join(users_dir, name)
-                        if os.path.isdir(user_path) and name not in ("Public", "Default", "Default User", "All Users", "desktop.ini"):
-                            os.environ["WINDOWS_USER"] = name
-                            logger.debug("Auto-detected WSL Windows user: %s", name)
-                            return
+        state_file = Path.home() / ".hermes" / "state" / "presence.json"
+        if not state_file.exists():
+            return
+
+        # Read state
+        content = state_file.read_text(encoding="utf-8")
+
+        # Write to Windows appdata via /mnt/c/
+        windows_username = _get_windows_username()
+        if not windows_username:
+            return
+
+        windows_appdata = (
+            Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
+        )
+        windows_state = windows_appdata / "hermes_presence.json"
+        windows_state.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write with safe encoding (avoid em dash)
+        safe_content = content.replace("\u2014", "--").replace("\u2013", "-")
+
+        with open(windows_state, "w", encoding="utf-8") as f:
+            f.write(safe_content)
+
+    except Exception:
+        pass  # Silent fail — mirror is best-effort
+
+
+def _is_wsl() -> bool:
+    """Detect if running under WSL."""
+    try:
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except Exception:
+        return False
+
+
+def _get_windows_username() -> str:
+    """Get Windows username from WSL."""
+    try:
+        result = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
+        if result and result != "%USERNAME%":
+            return result
     except Exception:
         pass
 
-
-def _state_file_for_profile(profile: str) -> Path:
-    """Return the state file path for a given profile.
-    
-    profile="main" → ~/.hermes/state/presence.json
-    profile="clinical" → ~/.hermes/state/presence-clinical.json
-    """
-    if profile and profile != "main":
-        return Path.home() / ".hermes" / "state" / f"presence-{profile}.json"
-    return Path.home() / ".hermes" / "state" / "presence.json"
-
-
-def setup_presence(
-    agent,
-    session_id: str = "",
-    source: str = "cli",
-    model: str = "",
-    provider: str = "",
-    profile: str = "main",
-):
-    """
-    Hook presence writer into an AIAgent instance.
-
-    Args:
-        agent: AIAgent instance
-        session_id: Hermes session ID
-        source: 'cli', 'telegram', 'discord', etc.
-        model: Model name
-        provider: Provider name
-        profile: 'main' (default) or 'clinical' — controls state file path
-    """
-    # Auto-detect WSL2 Windows user BEFORE importing writer.py,
-    # because writer.py resolves WINDOWS_STATE_FILE at module level.
-    _auto_detect_wsl()
-
+    # Fallback: scan /mnt/c/Users/
     try:
-        from hermes_presence.writer import PresenceWriter
-    except ImportError:
-        logger.debug("hermes-presence not installed, skipping")
-        return None
+        users_dir = Path("/mnt/c/Users")
+        for p in users_dir.iterdir():
+            if p.is_dir() and (p / "AppData").exists():
+                return p.name
+    except Exception:
+        pass
 
-    state_file = _state_file_for_profile(profile)
+    return ""
 
-    writer = PresenceWriter(
-        state_file=state_file,
-        session_id=session_id or getattr(agent, "session_id", ""),
-        source=source,
-        model=model or getattr(agent, "model", ""),
-        provider=provider or getattr(agent, "provider", ""),
-        profile=profile,
+
+def _load_hermes_hook():
+    """
+    Compatibility shim for Hermes CLI's hook loading mechanism.
+
+    Hermes calls this function when loading the plugin.
+    Returns a dict of hook_name -> callable.
+    """
+    return {
+        "on_session_start": on_session_start,
+        "on_tool_start": on_tool_start,
+        "on_tool_end": on_tool_end,
+        "on_tool_error": on_tool_error,
+        "on_thinking": on_thinking,
+        "on_model_info": on_model_info,
+        "on_subagent_change": on_subagent_change,
+        "on_kanban_phase": on_kanban_phase,
+        "on_session_end": on_session_end,
+        "on_shutdown": on_shutdown,
+    }
+
+
+# Standalone entry — auto-setup
+def auto_setup():
+    """Detect environment and wire up hooks automatically."""
+    if is_disabled():
+        return
+
+    writer = get_writer()
+    writer.set_session(
+        model=os.environ.get("HERMES_MODEL", "unknown"),
+        provider=os.environ.get("HERMES_PROVIDER", "unknown"),
+        is_cron=_IS_CRON,
+        is_orchestrator=_IS_ORCHESTRATOR,
+        profile=_PROFILE,
     )
-
-    # Chain (don't overwrite) tool callbacks so TUI callbacks survive.
-    _orig_tool_start = getattr(agent, "tool_start_callback", None)
-    _orig_tool_complete = getattr(agent, "tool_complete_callback", None)
-    _orig_tool_progress = getattr(agent, "tool_progress_callback", None)
-
-    def _chain_start(tc_id, name, args):
-        writer.on_tool_start(name, args)
-        if _orig_tool_start:
-            _orig_tool_start(tc_id, name, args)
-
-    def _chain_complete(tc_id, name, args, result):
-        writer.on_tool_complete(tc_id, name, args, result)
-        if _orig_tool_complete:
-            _orig_tool_complete(tc_id, name, args, result)
-
-    def _chain_progress(event_type, name=None, preview=None, args=None, **kwargs):
-        if event_type == "tool.started" and name:
-            writer.on_tool_start(name, args)
-        if _orig_tool_progress:
-            _orig_tool_progress(event_type, name, preview, args, **kwargs)
-
-    agent.tool_start_callback = _chain_start
-    agent.tool_complete_callback = _chain_complete
-    agent.tool_progress_callback = _chain_progress
-
-    logger.info("Hermes Presence writer hooked (session=%s, profile=%s)", writer._session_id, profile)
-    return writer
+    writer.idle()
+    _mirror_to_windows_if_wsl()
 
 
-def auto_setup(agent, profile: str = "main"):
-    """Auto-detect settings from agent and enable presence."""
-    return setup_presence(
-        agent=agent,
-        session_id=getattr(agent, "session_id", ""),
-        source=getattr(agent, "platform", "cli"),
-        model=getattr(agent, "model", ""),
-        provider=getattr(agent, "provider", ""),
-        profile=profile,
-    )
+def setup_presence(config_path: Optional[Path] = None):
+    """
+    Legacy setup function — deprecated, use auto_setup().
+
+    Kept for backward compatibility with existing configurations.
+    """
+    auto_setup()
