@@ -328,7 +328,7 @@ def get_state_file_path(profile: str = "main") -> Path:
     """Get the state file path, respecting env override and profile.
 
     Main profile: ~/.hermes/state/presence.json
-    Apollo profile: ~/.hermes/state/apollo_presence.json
+    Custom profile: ~/.hermes/state/{profile}_presence.json
     Other profiles: ~/.hermes/state/{profile}_presence.json
     """
     env_path = _env_state_file()

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from pypresence import Presence, DiscordNotFound, PipeClosed
 
-CLIENT_ID = "1497983221697347614"
+CLIENT_ID = "YOUR_CLIENT_ID_HERE"
 STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence.json"
 
 # Try ALL pipes — maintain separate connections for stable + Canary

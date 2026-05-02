@@ -32,14 +32,13 @@ All notable changes to Hermes Presence.
 ## [3.1.0] - 2026-04-28
 
 ### Added
-- Profile-aware WSL-to-Windows state file mirroring (main, clinical, custom profiles)
+- Profile-aware WSL-to-Windows state file mirroring (default, research, custom profiles)
 - Single Discord application architecture -- one client ID, one slot, no conflicts
 - Two-layer "unknown model" fix: bridge restore + write-time safety net
-- Clinical monitor (apollo profile) disabled to prevent slot conflicts
 
 ### Fixed
 - `unknown` model displayed in Discord when `post_llm_call` hook runs with fresh writer
-- State file mirror now uses profile-specific filenames (`clinical_presence.json` etc.)
+- State file mirror now uses profile-specific filenames (`research_presence.json` etc.)
 
 ---
 

@@ -586,7 +586,7 @@ def main():
     p_install.add_argument(
         "--profile",
         default="main",
-        help="Profile to install for (main, apollo, or any custom profile)",
+        help="Profile to install for (default, research, or any custom profile)",
     )
     p_install.add_argument(
         "--dry-run",
@@ -615,7 +615,7 @@ def main():
     p_run.add_argument(
         "--profile",
         default="main",
-        help="Profile to monitor (main, apollo, or any custom profile)",
+        help="Profile to monitor (default, research, or any custom profile)",
     )
     p_run.add_argument("--log-file", default=None, help="Path to write JSON-lines log output")
 

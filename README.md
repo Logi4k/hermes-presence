@@ -17,7 +17,7 @@ Discord Profile
 ## Features
 
 - **Real-time Discord presence**: Tool name, model, provider, session metrics, cost tracking
-- **Multi-profile support**: Run separate presences for main, clinical-monitor, or any custom Hermes profile (`--profile apollo`)
+- **Multi-profile support**: Run separate presences for different Hermes profiles (`--profile research` or `--profile custom-name`)
 - **Cross-platform**: Linux (systemd), macOS (launchd), Windows (scheduled task), WSL2 (Windows-side process)
 - **WSL-to-Windows mirroring**: Profile-aware state file copied to `%APPDATA%/<profile>_presence.json` for native apps
 - **Session metrics**: Tool call count, sub-agent count, files modified, cost in USD
@@ -49,12 +49,12 @@ hermes-presence status
 3. Copy the "Application ID" from the General Information page
 4. (Optional) Upload an icon and set Rich Presence art assets
 
-### For clinical-monitor or other profiles
+### For additional Hermes profiles
 
 ```bash
-hermes-presence install --profile apollo --client-id YOUR_APOLLO_CLIENT_ID
-hermes-presence status   # checks main profile
-# State file: ~/.hermes/state/apollo_presence.json
+hermes-presence install --profile research --client-id YOUR_RESEARCH_CLIENT_ID
+hermes-presence status --profile research
+# State file: ~/.hermes/state/research_presence.json
 ```
 
 ## Architecture
@@ -63,13 +63,13 @@ hermes-presence status   # checks main profile
 Hermes Agent (post_llm_call hook)
     │
     ▼
-StateFileWriter ──► ~/.hermes/state/presence.json   ← main profile
-    │                 ~/.hermes/state/apollo_presence.json  ← apollo profile
+StateFileWriter ──► ~/.hermes/state/presence.json   ← default profile
+    │                 ~/.hermes/state/research_presence.json  ← research profile
     │
     ├──► UnifiedMonitor (reads state → Discord RPC)
     │
     └──► Windows mirror: %APPDATA%/hermes_presence.json
-                          %APPDATA%/apollo_presence.json  ← WSL2 only
+                          %APPDATA%/research_presence.json  ← WSL2 only
 ```
 
 The hook fires after every LLM call: extracts model, provider, and tool info, writes a JSON state file. A background monitor process polls the state file and updates Discord Rich Presence.
@@ -81,7 +81,7 @@ The hook fires after every LLM call: extracts model, provider, and tool info, wr
 | Command | Description |
 |---|---|
 | `hermes-presence install` | One-command setup: check deps, get client ID, install background service |
-| `hermes-presence install --profile apollo` | Install for a specific Hermes profile |
+| `hermes-presence install --profile research` | Install for a specific Hermes profile |
 | `hermes-presence uninstall` | Stop and remove the background service |
 | `hermes-presence status` | Show human-readable status |
 | `hermes-presence status --json` | Machine-readable JSON output (for scripts/dashboards) |
@@ -102,7 +102,7 @@ Config is stored at `~/.hermes/presence.toml`. All values have sensible defaults
 
 ```toml
 [discord]
-client_id = "1497983221697347614"
+client_id = "YOUR_CLIENT_ID_HERE"
 
 [display]
 show_model = true
@@ -185,9 +185,9 @@ hermes-presence status --json | python -m json.tool
 ## Profiles
 
 | Profile | State file | Discord app | Monitor |
-|---|---|---|---|
-| `main` (default) | `~/.hermes/state/presence.json` | Main Hermes (client_id) | `hermes-presence` service |
-| `apollo` | `~/.hermes/state/apollo_presence.json` | Clinical monitor (client_id) | Separate `install --profile apollo` |
+|---|---|---|---|---|
+| `main` (default) | `~/.hermes/state/presence.json` | Default Hermes (client_id) | `hermes-presence` service |
+| `research` | `~/.hermes/state/research_presence.json` | Research profile (client_id) | Separate `install --profile research` |
 | `custom` | `~/.hermes/state/{profile}_presence.json` | Any client_id | Separate `install --profile {name}` |
 
 ## License

@@ -96,7 +96,7 @@ class PresenceWriter:
         Uses profile-specific filenames so multiple Hermes profiles
         can coexist without overwriting each other:
           main     → hermes_presence.json
-          clinical → clinical_presence.json
+          research → research_presence.json
           other    → {profile}_presence.json
         """
         if not _is_wsl():

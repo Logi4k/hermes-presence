@@ -110,13 +110,15 @@ class WindowsLauncher(PlatformLauncher):
     def __init__(self, client_id: str, state_file: Path, profile: str = "main"):
         super().__init__(client_id, state_file)
         self.profile = profile
-        # Task name differs for non-main profiles
-        self._task_name = "ApolloPresence" if profile == "apollo" else TASK_NAME
-        # Monitor target differs for non-main
+        # Task name differs for non-default profiles
+        self._task_name = f"{profile.capitalize()}Presence" if profile != "main" else TASK_NAME
+        # Monitor target differs for non-default
         self._monitor_target = Path(_APPDATA) / (
-            "apollo_presence_monitor.py" if profile == "apollo" else "hermes_presence_monitor.py"
+            f"{profile}_presence_monitor.py" if profile != "main" else "hermes_presence_monitor.py"
         )
-        self._startup_bat_name = "apollo_presence.bat" if profile == "apollo" else "hermes_presence.bat"
+        self._startup_bat_name = (
+            f"{profile}_presence.bat" if profile != "main" else "hermes_presence.bat"
+        )
 
     def _find_python(self) -> str:
         """Locate Python on Windows. Uses cached result, then a priority chain:
@@ -305,7 +307,9 @@ start "" /B "{py_path_clean}" "{win_target}"
         if not running:
             try:
                 monitor_name = (
-                    "apollo_presence_monitor" if self.profile == "apollo" else "hermes_presence_monitor"
+                    f"{self.profile}_presence_monitor"
+                    if self.profile != "main"
+                    else "hermes_presence_monitor"
                 )
                 ps_cmd = (
                     "Get-WmiObject Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | "

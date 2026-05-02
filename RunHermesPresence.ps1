@@ -6,7 +6,7 @@
 #   Copy RunHermesPresence.bat to shell:startup
 
 param(
-    [string]$ClientId = "1497983221697347614",
+    [string]$ClientId = "YOUR_CLIENT_ID_HERE",
     [string]$StateFile = "$env:APPDATA\hermes_presence.json"
 )
 

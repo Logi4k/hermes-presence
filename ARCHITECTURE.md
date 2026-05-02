@@ -24,8 +24,7 @@ hermes-presence/
 │       ├── macos.py             # launchd plist template + install
 │       └── windows.py           # Scheduled Task + .bat startup + %APPDATA% copy
 ├── scripts/
-│   ├── run_presence.py          # [LEGACY - kept for reference] Windows monitor
-│   └── run_presence_clinical.py # [LEGACY] Clinical profile monitor
+│   └── run_presence.py          # Quick run script for Windows
 ├── assets/
 │   ├── hermes_logo.png
 │   ├── status_active.png
@@ -99,7 +98,7 @@ pipe_connect_retry = 3            # Seconds between pipe reconnect attempts
   - Configurable idle timeout
   - Tool exclude filter
   - Error state on tool failure
-  - Profiles: main, clinical, custom (reads from state file's `profile` field)
+  - Profiles: default, research, custom (reads from state file's `profile` field)
 
 ### installer.py — One-Command Installer
 
@@ -145,7 +144,7 @@ Adds new fields. Backward-compatible.
 {
   "version": 3,
   "timestamp": "2026-05-02T00:00:00Z",
-  "profile": "main",
+  "profile": "default",
   "session": {
     "id": "session-abc12345",
     "source": "cli",
