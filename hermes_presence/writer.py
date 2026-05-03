@@ -9,7 +9,6 @@ Thread-safe: uses atomic writes (write to temp + rename).
 """
 
 import json
-import os
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -21,6 +20,12 @@ from .tool_icons import TOOL_ICONS
 DEFAULT_STATE_FILE = Path.home() / ".hermes" / "state" / "presence.json"
 
 # Mapping of tool names to presence display details
+
+
+def _humanize_tool_name(tool_name: str) -> str:
+    """Return a readable label for unknown tool names."""
+    cleaned = str(tool_name or "tool").replace("_", " ").replace("-", " ").strip()
+    return " ".join(part.capitalize() for part in cleaned.split()) or "Tool"
 
 
 class PresenceWriter:
@@ -180,7 +185,7 @@ class PresenceWriter:
 
         icon = TOOL_ICONS.get(
             tool_name,
-            {"detail": f"Using {tool_name}", "large_image": "status_active"},
+            {"detail": f"Using {_humanize_tool_name(tool_name)}", "large_image": "status_active"},
         )
         detail = icon["detail"]
         large_image = icon.get("large_image", "status_active")
@@ -217,10 +222,10 @@ class PresenceWriter:
         )
 
     def thinking(self):
-        """Signal that the model is streaming/generating a response."""
+        """Signal that the model is composing the assistant reply."""
         self._write_state(
             state="thinking",
-            detail="Generating response...",
+            detail="Composing reply",
             large_image="status_working",
         )
 
@@ -478,9 +483,17 @@ def _get_windows_username() -> str:
     except Exception:
         pass
 
-    # Fallback: cmd.exe (fast, but may fail for Unicode names)
+    # Fallback: cmd.exe (fast, but may fail for Unicode names). Avoid shell
+    # redirection here: under WSL, `2>nul` creates a literal ./nul file.
     try:
-        username = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
+        result = subprocess.run(
+            ["cmd.exe", "/c", "echo", "%USERNAME%"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            stderr=subprocess.DEVNULL,
+        )
+        username = result.stdout.strip()
         if username and username != "%USERNAME%":
             return username
     except Exception:

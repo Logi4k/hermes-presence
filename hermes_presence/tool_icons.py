@@ -73,6 +73,7 @@ TOOL_ICONS: dict[str, dict[str, str]] = {
     "search_files": {"detail": "Searching files", "large_image": "status_active"},
     "todo": {"detail": "Managing task list", "large_image": "status_active"},
     "cronjob": {"detail": "Managing cron jobs", "large_image": "status_working"},
+    "process": {"detail": "Monitoring background process", "large_image": "status_active"},
 }
 
 # Simplified mapping for Discord large_image lookup (derived from TOOL_ICONS)

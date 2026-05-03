@@ -45,7 +45,7 @@ PIPES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 ACTIVITY_MAP = {
     "starting": ("Launching Hermes", "Starting session..."),
-    "thinking": ("Thinking", "Processing..."),
+    "thinking": ("Answering", "Composing reply"),
     "error": ("Error", None),
     "offline": ("Offline", "Session ended"),
     "orchestrating": ("Orchestrating", None),
@@ -204,6 +204,8 @@ class UnifiedMonitor:
         self.connections: dict[int, Presence] = {}
         self.last_hash = ""
         self.session_start: Optional[datetime] = None
+        self._last_push_monotonic = 0.0
+        self._republish_interval = max(30, int(self.poll_interval) * 6)
 
         # State tracking
         self._disconnected_notified = False
@@ -305,7 +307,7 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print("[start] Hermes Presence Monitor v3.1.1", flush=True)
+        print("[start] Hermes Presence Monitor v3.1.2", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
@@ -389,7 +391,7 @@ class UnifiedMonitor:
         sess = state.get("session", {})
         state_name = act.get("state", "thinking")
         detail = act.get("detail", "")
-        tool = act.get("tool", "")
+        tool = act.get("tool") or ""
         subagent_count = sess.get("subagent_count", 0)
         tool_started_at = act.get("tool_started_at")
         is_error = act.get("is_error", False)
@@ -466,6 +468,8 @@ class UnifiedMonitor:
             state_text,
             details,
             tool,
+            str(sess.get("id", "")),
+            str(sess.get("started_at", "")),
             str(sess.get("tool_calls_count", 0)),
             str(subagent_count),
         ]
@@ -475,7 +479,10 @@ class UnifiedMonitor:
 
         new_hash = "|".join(hash_parts)
 
-        if new_hash != self.last_hash:
+        now_mono = time.monotonic()
+        should_republish = (now_mono - self._last_push_monotonic) >= self._republish_interval
+
+        if new_hash != self.last_hash or should_republish:
             # ---- Sub-agent party size (Tier 1) ----
             party = None
             if subagent_count > 0:
@@ -491,6 +498,7 @@ class UnifiedMonitor:
                 party_size=party,
             )
             self.last_hash = new_hash
+            self._last_push_monotonic = now_mono
 
             # ---- Console output (ASCII-safe) ----
             pipe_list = ",".join(str(p) for p in self.connections)

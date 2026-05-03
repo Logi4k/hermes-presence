@@ -319,9 +319,17 @@ def _get_windows_username() -> str:
     except Exception:
         pass
 
-    # Fallback: cmd.exe (fast, but may fail for Unicode names)
+    # Fallback: cmd.exe (fast, but may fail for Unicode names). Avoid shell
+    # redirection here: under WSL, `2>nul` creates a literal ./nul file.
     try:
-        username = os.popen("cmd.exe /c echo %USERNAME% 2>nul").read().strip()
+        result = subprocess.run(
+            ["cmd.exe", "/c", "echo", "%USERNAME%"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            stderr=subprocess.DEVNULL,
+        )
+        username = result.stdout.strip()
         if username and username != "%USERNAME%":
             return username
     except Exception:

@@ -4,6 +4,21 @@ All notable changes to Hermes Presence.
 
 ---
 
+## [3.1.2] - 2026-05-03
+
+### Fixed
+- Discord presence now republishes when a restarted Hermes session has the same visible idle/model state.
+- Windows monitor retries indefinitely when Discord is closed, so startup fallback can recover after Discord launches later.
+- Periodic republish keeps Discord IPC pipes fresh after Discord or Hermes restarts.
+- Presence copy now uses `Answering` / `Composing reply` instead of `Thinking` / `Generating response`.
+- Tool display now labels background process monitoring instead of falling back to `Using process`.
+- WSL username helpers no longer create stray `nul` files.
+
+### Added
+- Regression coverage for Hermes restart pickup, periodic republish, Windows monitor retry behavior, and improved status copy.
+
+---
+
 ## [3.1.1] - 2026-05-02
 
 ### Added
