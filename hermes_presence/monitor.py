@@ -189,6 +189,8 @@ class UnifiedMonitor:
         idle_timeout: int = 10,
         show_model: bool = True,
         show_provider: bool = True,
+        show_reasoning: bool = True,
+        privacy_mode: bool = False,
         poll_interval: int = 5,
         pipe_connect_retry: int = 3,
         large_image: str = "hermes_logo",
@@ -207,6 +209,8 @@ class UnifiedMonitor:
         self.idle_timeout = idle_timeout
         self.show_model = show_model
         self.show_provider = show_provider
+        self.show_reasoning = show_reasoning
+        self.privacy_mode = privacy_mode
         self.poll_interval = poll_interval
         self.pipe_connect_retry = pipe_connect_retry
         self.large_image = large_image
@@ -325,7 +329,7 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print("[start] Hermes Presence Monitor v3.1.2", flush=True)
+        print("[start] Hermes Presence Monitor v3.2.0", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
@@ -415,6 +419,10 @@ class UnifiedMonitor:
         is_error = act.get("is_error", False)
 
         # ---- Tool exclude filter (Tier 3.16) ----
+        if self.privacy_mode:
+            tool = ""
+            detail = "Working privately"
+
         if tool in self.exclude_tools:
             # Still show working state but without tool detail
             tool = ""
@@ -444,7 +452,7 @@ class UnifiedMonitor:
         if model_label:
             state_text = f"{state_text} -- {model_label}"
 
-        reasoning_label = _format_reasoning_label(sess.get("reasoning_effort", ""))
+        reasoning_label = _format_reasoning_label(sess.get("reasoning_effort", "")) if self.show_reasoning else ""
         if reasoning_label:
             state_text = f"{state_text} -- {reasoning_label}"
 
@@ -459,7 +467,7 @@ class UnifiedMonitor:
 
         # ---- Tool-specific icon (Tier 1, already v2) ----
         small_img = _resolve_small_icon(tool, state_name)
-        small_text = tool or state_name
+        small_text = "private" if self.privacy_mode else (tool or state_name)
 
         # ---- Per-tool timer ----
         if tool_started_at:
@@ -507,6 +515,9 @@ class UnifiedMonitor:
         # Tier 4 additions
         hash_parts.append(str(sess.get("files_modified", 0)))
         hash_parts.append(str(act.get("is_error", False)))
+        hash_parts.append(str(sess.get("reasoning_effort", "")))
+        hash_parts.append(str(self.show_reasoning))
+        hash_parts.append(str(self.privacy_mode))
 
         new_hash = "|".join(hash_parts)
 
@@ -583,6 +594,8 @@ def create_monitor(
         idle_timeout=cfg.display.idle_timeout,
         show_model=cfg.display.show_model,
         show_provider=cfg.display.show_provider,
+        show_reasoning=cfg.display.show_reasoning,
+        privacy_mode=cfg.display.privacy_mode,
         poll_interval=cfg.advanced.poll_interval,
         pipe_connect_retry=cfg.advanced.pipe_connect_retry,
         large_image=cfg.display.large_image,

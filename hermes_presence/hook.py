@@ -61,7 +61,7 @@ def _reasoning_effort_from_agent(agent=None) -> str:
             return effort
 
     try:
-        import yaml
+        import yaml  # type: ignore[import-untyped]
 
         cfg_path = Path.home() / ".hermes" / "config.yaml"
         if cfg_path.exists():

@@ -1,29 +1,31 @@
 # Hermes Presence
 
 [![CI](https://github.com/Logi4k/hermes-presence/actions/workflows/ci.yml/badge.svg)](https://github.com/Logi4k/hermes-presence/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-3.1.1-blue)](https://github.com/Logi4k/hermes-presence)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue)](https://github.com/Logi4k/hermes-presence)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 
-Cross-platform Discord Rich Presence for Hermes Agent. Shows what Hermes is doing in real time on Discord: active tool, current model, provider, session cost, and sub-agent count.
+Cross-platform Discord Rich Presence for Hermes Agent. Shows what Hermes is doing in real time on Discord: active tool, current model, provider, reasoning level, privacy-safe mode, session cost, and sub-agent count.
 
 ## Screenshot
 
 ```
 Discord Profile
   Playing Hermes Agent
-  Running tools: 1276 · Model: deepseek-v4 · $0.0834 · 2 subs
+  Working | GPT-5.5 (Codex) | R: high · Tool calls: 1276 · 2 subs
 ```
 
 ## Features
 
 - **Real-time Discord presence**: Tool name, model, provider, session metrics, cost tracking
 - **Multi-profile support**: Run separate presences for different Hermes profiles (`--profile research` or `--profile custom-name`)
-- **Cross-platform**: Linux (systemd), macOS (launchd), Windows (scheduled task), WSL2 (Windows-side process)
+- **Cross-platform**: Linux (systemd), macOS (launchd), Windows hidden Startup launcher via `wscript`/`pythonw.exe`, WSL2 (Windows-side process)
 - **WSL-to-Windows mirroring**: Profile-aware state file copied to `%APPDATA%/<profile>_presence.json` for native apps
 - **Session metrics**: Tool call count, sub-agent count, files modified, cost in USD
 - **Webhook notifications**: POST state changes to any HTTP endpoint (Telegram bot, Slack, etc.)
-- **Self-update**: `hermes-presence update` pulls latest from GitHub and reinstalls
-- **Rich CLI**: `status --json`, `restart`, `validate`, `config set`, `run --profile`
+- **Self-update**: `hermes-presence update --restart` pulls latest from GitHub and restarts the monitor
+- **Privacy controls**: hide reasoning labels or run in privacy mode to avoid leaking filenames/tools
+- **Startup doctor**: `doctor --fix` detects visible `.bat` launchers, stale scheduled tasks, and legacy pollers
+- **Rich CLI**: `status --json`, `status --verbose`, `restart`, `validate`, `doctor`, `cleanup-profiles`, `config set`, `run --profile`
 - **Hermes hook integration**: `post_llm_call` hook intercepts model info for "unknown model" fix
 
 ## Quick Start
@@ -72,7 +74,7 @@ StateFileWriter ──► ~/.hermes/state/presence.json   ← default profile
                           %APPDATA%/research_presence.json  ← WSL2 only
 ```
 
-The hook fires after every LLM call: extracts model, provider, and tool info, writes a JSON state file. A background monitor process polls the state file and updates Discord Rich Presence.
+The hook fires after every LLM call: extracts model, provider, reasoning effort, and tool info, writes a JSON state file. A background monitor process polls the state file and updates Discord Rich Presence.
 
 **Single-presence architecture**: One monitor process handles one profile's state file. Run multiple monitors for multiple profiles with different `--profile` values. Each profile tracks its own Discord client ID, state file, and session metrics.
 
@@ -84,14 +86,17 @@ The hook fires after every LLM call: extracts model, provider, and tool info, wr
 | `hermes-presence install --profile research` | Install for a specific Hermes profile |
 | `hermes-presence uninstall` | Stop and remove the background service |
 | `hermes-presence status` | Show human-readable status |
-| `hermes-presence status --json` | Machine-readable JSON output (for scripts/dashboards) |
+| `hermes-presence status --json` | Machine-readable JSON output including model/provider/reasoning |
+| `hermes-presence status --verbose` | Show launcher paths, process names, and startup details |
 | `hermes-presence enable` | Re-enable after disable |
 | `hermes-presence disable` | Temporarily stop presence without uninstalling |
 | `hermes-presence validate` | Run diagnostic checks (pip, Discord, WSL bridge) |
+| `hermes-presence doctor --fix` | Diagnose and safely clean visible Windows startup launchers and old tasks |
+| `hermes-presence cleanup-profiles clinical` | Remove stale Windows launchers/monitors for a named profile |
 | `hermes-presence config` | Show current configuration |
 | `hermes-presence config set <key> <value>` | Update config (e.g., `display.idle_timeout 20`) |
 | `hermes-presence run` | Run monitor in foreground for debugging |
-| `hermes-presence update` | Self-update from GitHub |
+| `hermes-presence update --restart` | Self-update from GitHub and restart the monitor |
 | `hermes-presence restart` | Restart the background monitor |
 | `hermes-presence version` | Show version |
 | `hermes-presence help` | Show full help |
@@ -107,6 +112,8 @@ client_id = "YOUR_CLIENT_ID_HERE"
 [display]
 show_model = true
 show_provider = true
+show_reasoning = true
+privacy_mode = false
 idle_timeout = 10
 large_image = "hermes_logo"
 large_text = "Hermes Agent"

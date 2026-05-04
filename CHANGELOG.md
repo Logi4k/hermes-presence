@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.2.0] - 2026-05-04
+
+### Added
+- Display reasoning effort in Discord state and hover text.
+- `display.show_reasoning` and `display.privacy_mode` controls.
+- `status --json` reasoning metadata and `status --verbose` launcher diagnostics.
+- `doctor --fix` for Windows startup issues and stale legacy tasks.
+- `cleanup-profiles` for stale Windows profile launchers and monitor scripts.
+- `update --restart` to update and restart in one command.
+- GitHub release workflow for wheel/sdist builds and tagged PyPI publishing.
+
+### Fixed
+- Windows startup monitor now prefers hidden `pythonw.exe`/`wscript` launch.
+- Config writer now preserves inline dict keys correctly.
+
 All notable changes to Hermes Presence.
 
 ---

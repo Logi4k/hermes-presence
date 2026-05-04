@@ -107,6 +107,8 @@ def _install_platform(
     try:
         from .platforms import PlatformLauncher
 
+        cfg = load_config()
+
         launcher: PlatformLauncher
         if platform == "linux":
             from .platforms.linux import LinuxLauncher
@@ -119,7 +121,13 @@ def _install_platform(
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
 
-            launcher = WindowsLauncher(client_id, state_file, profile=profile)
+            launcher = WindowsLauncher(
+                client_id,
+                state_file,
+                profile=profile,
+                show_reasoning=cfg.display.show_reasoning,
+                privacy_mode=cfg.display.privacy_mode,
+            )
         else:
             print(f"[SKIP] No auto-start mechanism for platform: {platform}")
             return True
@@ -167,7 +175,7 @@ def install(
 
     Returns True if successful, False on critical failure.
     """
-    print("Hermes Presence Installer v3.1.2" + (f" (profile: {profile})" if profile != "main" else ""))
+    print("Hermes Presence Installer v3.2.0" + (f" (profile: {profile})" if profile != "main" else ""))
     print("=" * 40)
 
     platform = _detect_platform()

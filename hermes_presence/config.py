@@ -36,6 +36,8 @@ DISABLE_MARKER = Path.home() / ".hermes" / ".presence_disabled"
 class DisplayConfig:
     show_model: bool = True
     show_provider: bool = True
+    show_reasoning: bool = True
+    privacy_mode: bool = False
     idle_timeout: int = 10
     large_image: str = "hermes_logo"
     large_text: str = "Hermes Agent"
@@ -147,7 +149,7 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
             # display section
             if "display" in raw:
                 dp = raw["display"]
-                for key in ("show_model", "show_provider"):
+                for key in ("show_model", "show_provider", "show_reasoning", "privacy_mode"):
                     if key in dp:
                         setattr(config.display, key, bool(dp[key]))
                 if "idle_timeout" in dp:

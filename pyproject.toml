@@ -1,6 +1,6 @@
 [project]
 name = "hermes-presence"
-version = "3.1.2"
+version = "3.2.0"
 description = "Cross-platform Discord Rich Presence for Hermes Agent — one-command install, all OSes supported"
 readme = "README.md"
 requires-python = ">=3.9"

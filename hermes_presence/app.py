@@ -17,6 +17,7 @@ Environment variables:
 """
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -63,8 +64,10 @@ def _cmd_status(args):
     from .config import get_state_file_path, is_disabled, load_config
 
     cfg = load_config()
-    state_file = get_state_file_path()
+    profile = getattr(args, "profile", "main")
+    state_file = get_state_file_path(profile=profile)
     json_mode = getattr(args, "json", False)
+    verbose = getattr(args, "verbose", False)
 
     if json_mode:
         import json as _json
@@ -76,6 +79,8 @@ def _cmd_status(args):
             "idle_timeout": cfg.display.idle_timeout,
             "show_model": cfg.display.show_model,
             "show_provider": cfg.display.show_provider,
+            "show_reasoning": cfg.display.show_reasoning,
+            "privacy_mode": cfg.display.privacy_mode,
             "poll_interval": cfg.advanced.poll_interval,
             "excluded_tools": cfg.tools.exclude,
             "service": {"running": False, "auto_start": False, "pid": None, "pid_age_s": None},
@@ -87,7 +92,7 @@ def _cmd_status(args):
 
         platform = _detect_platform()
         try:
-            launcher = _get_launcher(platform, cfg.discord.client_id, state_file)
+            launcher = _get_launcher(platform, cfg.discord.client_id, state_file, profile=profile)
             if launcher:
                 s = launcher.status()
                 result["service"]["running"] = s.get("running", False)
@@ -121,6 +126,7 @@ def _cmd_status(args):
                     "detail": act.get("detail", ""),
                     "model": sess.get("model"),
                     "provider": sess.get("provider"),
+                    "reasoning_effort": sess.get("reasoning_effort", ""),
                     "tool_calls": sess.get("tool_calls_count", 0),
                     "subagents": sess.get("subagent_count", 0),
                     "files_modified": sess.get("files_modified", 0),
@@ -142,6 +148,8 @@ def _cmd_status(args):
     print(f"  Idle timeout:   {cfg.display.idle_timeout}s")
     print(f"  Show model:     {cfg.display.show_model}")
     print(f"  Show provider:  {cfg.display.show_provider}")
+    print(f"  Show reasoning: {cfg.display.show_reasoning}")
+    print(f"  Privacy mode:   {cfg.display.privacy_mode}")
     print(f"  Poll interval:  {cfg.advanced.poll_interval}s")
     if cfg.notify.url:
         events_str = ", ".join(cfg.notify.events) if cfg.notify.events else "all"
@@ -156,7 +164,7 @@ def _cmd_status(args):
     platform = _detect_platform()
 
     try:
-        launcher = _get_launcher(platform, cfg.discord.client_id, state_file)
+        launcher = _get_launcher(platform, cfg.discord.client_id, state_file, profile=profile)
         if launcher:
             s = launcher.status()
             print("Service Status")
@@ -173,6 +181,10 @@ def _cmd_status(args):
                         print(f"  PID age:     {mins}m {secs}s")
                     else:
                         print(f"  PID age:     {secs}s")
+            if verbose and hasattr(launcher, "diagnostics"):
+                diag = launcher.diagnostics()
+                for key, value in diag.items():
+                    print(f"  {key}: {value}")
             print()
     except ImportError:
         print("(Platform service status unavailable)")
@@ -193,6 +205,7 @@ def _cmd_status(args):
         print(f"  Detail:       {act.get('detail', '')[:80]}")
         print(f"  Model:        {sess.get('model', '?')}")
         print(f"  Provider:     {sess.get('provider', '?')}")
+        print(f"  Reasoning:    {sess.get('reasoning_effort', '?')}")
         print(f"  Tool calls:   {sess.get('tool_calls_count', 0)}")
         print(f"  Sub-agents:   {sess.get('subagent_count', 0)}")
         print(f"  Files mod'd:  {sess.get('files_modified', 0)}")
@@ -256,6 +269,8 @@ def _cmd_config(args):
         print(f"  discord.client_id     = {'[SET]' if cfg.discord.client_id else '(not set)'}")
         print(f"  display.show_model    = {cfg.display.show_model}")
         print(f"  display.show_provider = {cfg.display.show_provider}")
+        print(f"  display.show_reasoning = {cfg.display.show_reasoning}")
+        print(f"  display.privacy_mode  = {cfg.display.privacy_mode}")
         print(f"  display.idle_timeout  = {cfg.display.idle_timeout}s")
         print(f"  display.large_image   = {cfg.display.large_image}")
         print(f"  display.large_text    = {cfg.display.large_text}")
@@ -307,6 +322,8 @@ def _cmd_config(args):
     elif field in (
         "show_model",
         "show_provider",
+        "show_reasoning",
+        "privacy_mode",
         "force_windows_ipc",
         "state_file_mirror",
         "hermes_github",
@@ -370,6 +387,8 @@ def _cmd_run(args):
         idle_timeout=cfg.display.idle_timeout,
         show_model=cfg.display.show_model,
         show_provider=cfg.display.show_provider,
+        show_reasoning=cfg.display.show_reasoning,
+        privacy_mode=cfg.display.privacy_mode,
         poll_interval=cfg.advanced.poll_interval,
         pipe_connect_retry=cfg.advanced.pipe_connect_retry,
         large_image=cfg.display.large_image,
@@ -398,12 +417,11 @@ def _cmd_help(args):
 
 def _cmd_version(args):
     """Show version information."""
-    print("hermes-presence v3.1.2")
+    print("hermes-presence v3.2.0")
 
 
 def _cmd_update(args):
     """Self-update hermes-presence from GitHub."""
-    import subprocess
 
     print("Updating hermes-presence...")
     print("=" * 40)
@@ -425,7 +443,10 @@ def _cmd_update(args):
 
     print()
     print("[DONE] hermes-presence updated to latest.")
-    print("Run 'hermes-presence restart' to restart the monitor.")
+    if getattr(args, "restart", False):
+        _cmd_restart(args)
+    else:
+        print("Run 'hermes-presence restart' to restart the monitor.")
 
 
 def _cmd_restart(args):
@@ -441,9 +462,10 @@ def _cmd_restart(args):
     from .installer import _detect_platform
 
     platform = _detect_platform()
-    state_file = get_state_file_path()
+    profile = getattr(args, "profile", "main")
+    state_file = get_state_file_path(profile=profile)
 
-    launcher = _get_launcher(platform, cfg.discord.client_id, state_file)
+    launcher = _get_launcher(platform, cfg.discord.client_id, state_file, profile=profile)
     if not launcher:
         print(f"ERROR: No launcher for platform {platform}")
         sys.exit(1)
@@ -459,7 +481,45 @@ def _cmd_restart(args):
         print("[WARN] Monitor may not have restarted. Try 'hermes-presence install --force'.")
 
 
-def _get_launcher(platform: str, client_id: str, state_file):
+
+def _cmd_doctor(args):
+    """Diagnose common startup and runtime problems."""
+    from .installer import _detect_platform
+
+    platform = _detect_platform()
+    print("Hermes Presence Doctor")
+    print("=" * 40)
+    print(f"Platform: {platform}")
+    if platform not in ("windows", "wsl2"):
+        print("No Windows startup checks needed on this platform.")
+        return
+
+    from .platforms.windows import diagnose_startup
+
+    report = diagnose_startup(profile=getattr(args, "profile", "main"), fix=getattr(args, "fix", False))
+    if not report["issues"]:
+        print("[PASS] No known startup issues found")
+    for issue in report["issues"]:
+        print(f"[{issue['severity'].upper()}] {issue['id']}: {issue['message']}")
+    for fix in report.get("fixes", []):
+        print(f"[FIX] {fix}")
+
+
+def _cmd_cleanup_profiles(args):
+    """Remove stale Windows profile launchers and monitors."""
+    from .platforms.windows import cleanup_profile_artifacts
+
+    removed = []
+    for profile in args.profiles:
+        removed.extend(cleanup_profile_artifacts(profile))
+    if removed:
+        print("Removed stale profile artifacts:")
+        for item in removed:
+            print(f"  {item}")
+    else:
+        print("No stale profile artifacts found.")
+
+def _get_launcher(platform: str, client_id: str, state_file, profile: str = "main"):
     """Get the platform launcher for the given OS."""
     try:
         if platform == "linux":
@@ -473,7 +533,7 @@ def _get_launcher(platform: str, client_id: str, state_file):
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
 
-            return WindowsLauncher(client_id, state_file)
+            return WindowsLauncher(client_id, state_file, profile=profile)
     except ImportError:
         pass
     return None
@@ -601,6 +661,8 @@ def main():
     # status
     p_status = subparsers.add_parser("status", help="Show current status")
     p_status.add_argument("--json", action="store_true", help="Machine-readable JSON output")
+    p_status.add_argument("--verbose", action="store_true", help="Show launcher paths and platform details")
+    p_status.add_argument("--profile", default="main", help="Profile to inspect")
 
     # enable / disable
     subparsers.add_parser("enable", help="Re-enable after disable")
@@ -620,7 +682,7 @@ def main():
     p_run.add_argument("--log-file", default=None, help="Path to write JSON-lines log output")
 
     # version
-    parser.add_argument("--version", action="version", version="hermes-presence v3.1.2")
+    parser.add_argument("--version", action="version", version="hermes-presence v3.2.0")
 
     # help subcommand
     subparsers.add_parser("help", help="Show detailed help")
@@ -632,10 +694,21 @@ def main():
     subparsers.add_parser("validate", help="Validate installation")
 
     # update subcommand
-    subparsers.add_parser("update", help="Self-update from GitHub")
+    p_update = subparsers.add_parser("update", help="Self-update from GitHub")
+    p_update.add_argument("--restart", action="store_true", help="Restart monitor after update")
+    p_update.add_argument("--profile", default="main", help="Profile to restart after update")
 
     # restart subcommand
-    subparsers.add_parser("restart", help="Restart the monitor")
+    p_restart = subparsers.add_parser("restart", help="Restart the monitor")
+    p_restart.add_argument("--profile", default="main", help="Profile to restart")
+
+    # doctor / cleanup
+    p_doctor = subparsers.add_parser("doctor", help="Diagnose common startup issues")
+    p_doctor.add_argument("--fix", action="store_true", help="Apply safe startup cleanup fixes")
+    p_doctor.add_argument("--profile", default="main", help="Profile to diagnose")
+
+    p_cleanup = subparsers.add_parser("cleanup-profiles", help="Remove stale Windows profile artifacts")
+    p_cleanup.add_argument("profiles", nargs="+", help="Profile names to clean up")
 
     args = parser.parse_args()
 
@@ -656,6 +729,8 @@ def main():
         "validate": _cmd_validate,
         "update": _cmd_update,
         "restart": _cmd_restart,
+        "doctor": _cmd_doctor,
+        "cleanup-profiles": _cmd_cleanup_profiles,
     }
 
     cmd = commands.get(args.command)

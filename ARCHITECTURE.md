@@ -22,7 +22,7 @@ hermes-presence/
 │       ├── base.py              # Abstract base class for platform launchers
 │       ├── linux.py             # systemd user unit template + install
 │       ├── macos.py             # launchd plist template + install
-│       └── windows.py           # Scheduled Task + .bat startup + %APPDATA% copy
+│       └── windows.py           # hidden Startup launcher + optional Scheduled Task + %APPDATA% copy
 ├── scripts/
 │   └── run_presence.py          # Quick run script for Windows
 ├── assets/
@@ -116,8 +116,8 @@ Flow:
 4. Platform-specific launcher setup:
    - **Linux:** Create `~/.config/systemd/user/hermes-presence.service`, enable
    - **macOS:** Create `~/Library/LaunchAgents/com.hermes.presence.plist`, load
-   - **Windows:** Create Scheduled Task (TR2, AtLogon), copy .bat to `shell:startup`
-   - **WSL2:** Copy monitor to `%APPDATA%`, create Scheduled Task on Windows side
+   - **Windows:** Create hidden `wscript`/`pythonw.exe` Startup launcher, disable old visible `.bat` launchers
+   - **WSL2:** Copy monitor to `%APPDATA%`, run monitor on Windows side without a visible console
 5. Upload rich presence art assets to Discord (instructions + check)
 6. Start the monitor
 7. Verify connection
