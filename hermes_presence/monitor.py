@@ -452,7 +452,10 @@ class UnifiedMonitor:
         if model_label:
             state_text = f"{state_text} -- {model_label}"
 
-        reasoning_label = _format_reasoning_label(sess.get("reasoning_effort", "")) if self.show_reasoning else ""
+        if self.show_reasoning:
+            reasoning_label = _format_reasoning_label(sess.get("reasoning_effort", ""))
+        else:
+            reasoning_label = ""
         if reasoning_label:
             state_text = f"{state_text} -- {reasoning_label}"
 

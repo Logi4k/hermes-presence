@@ -7,8 +7,8 @@ a hidden launcher in the Startup folder for auto-start.
 On WSL2: commands run through powershell.exe bridge automatically.
 """
 
-import os
 import ntpath
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -66,7 +66,12 @@ def _windows_user_candidates() -> list[str]:
 
     try:
         for entry in sorted(Path("/mnt/c/Users").iterdir()):
-            if entry.is_dir() and not entry.name.startswith(".") and entry.name not in _IGNORED_WINDOWS_USER_DIRS:
+            is_real_user = (
+                entry.is_dir()
+                and not entry.name.startswith(".")
+                and entry.name not in _IGNORED_WINDOWS_USER_DIRS
+            )
+            if is_real_user:
                 if (entry / "AppData" / "Roaming").exists():
                     add(entry.name)
     except Exception:
@@ -329,7 +334,9 @@ class WindowsLauncher(PlatformLauncher):
         return "python"
 
     def _monitor_process_name(self) -> str:
-        return f"{self.profile}_presence_monitor" if self.profile != "main" else "hermes_presence_monitor"
+        if self.profile == "main":
+            return "hermes_presence_monitor"
+        return f"{self.profile}_presence_monitor"
 
     def _startup_script_path(self) -> Path:
         return STARTUP_DIR / self._startup_script_name
@@ -441,7 +448,10 @@ class WindowsLauncher(PlatformLauncher):
         self._monitor_target.unlink(missing_ok=True)
         self._startup_script_path().unlink(missing_ok=True)
         self._legacy_bat_path().unlink(missing_ok=True)
-        self._legacy_bat_path().with_suffix(self._legacy_bat_path().suffix + ".disabled").unlink(missing_ok=True)
+        disabled_bat = self._legacy_bat_path().with_suffix(
+            self._legacy_bat_path().suffix + ".disabled"
+        )
+        disabled_bat.unlink(missing_ok=True)
         return not self.is_installed()
 
     def is_installed(self) -> bool:
@@ -910,7 +920,20 @@ while True:
 
         # Hash check. Include session identity so Hermes restarts with the same
         # visible idle state still repush presence after Discord/Hermes restart.
-        new_hash = f"{{state_text}}|{{details}}|{{tool}}|{{session_id}}|{{started_at}}|{{calls}}|{{subs}}|{{tool_started_at}}|{{reasoning_effort}}|{{SHOW_REASONING}}|{{PRIVACY_MODE}}"
+        hash_parts = [
+            state_text,
+            details,
+            tool,
+            session_id,
+            started_at,
+            str(calls),
+            str(subs),
+            str(tool_started_at),
+            reasoning_effort,
+            str(SHOW_REASONING),
+            str(PRIVACY_MODE),
+        ]
+        new_hash = "|".join(hash_parts)
         now_mono = time.monotonic()
         should_republish = (now_mono - last_push_monotonic) >= REPUBLISH_INTERVAL
         if new_hash != last_hash or should_republish:
@@ -988,9 +1011,14 @@ def _task_scheduler_xml(task_name: str, python_path: str, script_path: str) -> s
 
 
 def _profile_artifact_paths(profile: str) -> list[Path]:
-    monitor_name = "hermes_presence_monitor.py" if profile == "main" else f"{profile}_presence_monitor.py"
-    vbs_name = "hermes_presence.vbs" if profile == "main" else f"{profile}_presence.vbs"
-    bat_name = "hermes_presence.bat" if profile == "main" else f"{profile}_presence.bat"
+    if profile == "main":
+        monitor_name = "hermes_presence_monitor.py"
+        vbs_name = "hermes_presence.vbs"
+        bat_name = "hermes_presence.bat"
+    else:
+        monitor_name = f"{profile}_presence_monitor.py"
+        vbs_name = f"{profile}_presence.vbs"
+        bat_name = f"{profile}_presence.bat"
     return [
         STARTUP_DIR / vbs_name,
         STARTUP_DIR / bat_name,
@@ -1089,7 +1117,10 @@ def diagnose_startup(profile: str = "main", fix: bool = False) -> dict:
         issues.append({
             "id": "pythonw_missing",
             "severity": "info",
-            "message": "pythonw.exe was not found beside python.exe; console-free startup may depend on WScript only.",
+            "message": (
+                "pythonw.exe was not found beside python.exe; "
+                "console-free startup may depend on WScript only."
+            ),
         })
 
     return {"profile": profile, "issues": issues, "fixes": fixes}

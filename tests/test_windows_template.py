@@ -24,7 +24,8 @@ def test_windows_monitor_template_displays_model_and_reasoning_metadata():
     assert "openai-codex" in script
     assert "_format_reasoning_label" in script
     assert '"large_text": " | ".join(hover_parts)' in script
-    assert "|{reasoning_effort}" in script
+    assert "hash_parts = [" in script
+    assert "reasoning_effort," in script
 
 
 def test_windows_startup_launcher_uses_pythonw_and_hidden_wscript_run(monkeypatch):

@@ -661,7 +661,11 @@ def main():
     # status
     p_status = subparsers.add_parser("status", help="Show current status")
     p_status.add_argument("--json", action="store_true", help="Machine-readable JSON output")
-    p_status.add_argument("--verbose", action="store_true", help="Show launcher paths and platform details")
+    p_status.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show launcher paths and platform details",
+    )
     p_status.add_argument("--profile", default="main", help="Profile to inspect")
 
     # enable / disable
