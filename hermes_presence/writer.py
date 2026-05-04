@@ -52,6 +52,7 @@ class PresenceWriter:
         self._current_tool: Optional[str] = None
         self._current_model: str = "unknown"
         self._current_provider: str = "unknown"
+        self._reasoning_effort: str = ""
         self._is_cron: bool = False
         self._is_orchestrator: bool = False
         self._kanban_phase: Optional[str] = None
@@ -74,10 +75,13 @@ class PresenceWriter:
             sess = data.get("session", {})
             model = sess.get("model", "")
             provider = sess.get("provider", "")
+            reasoning_effort = sess.get("reasoning_effort", "")
             if model and model != "unknown":
                 self._current_model = model
             if provider and provider != "unknown":
                 self._current_provider = provider
+            if reasoning_effort:
+                self._reasoning_effort = str(reasoning_effort)
             # Also restore accumulated stats
             self._tool_calls_count = sess.get("tool_calls_count", 0)
             self._files_modified = sess.get("files_modified", 0)
@@ -146,10 +150,13 @@ class PresenceWriter:
         is_cron: bool = False,
         is_orchestrator: bool = False,
         profile: Optional[str] = None,
+        reasoning_effort: str = "",
     ):
         """Called at session start with model/provider info."""
         self._current_model = model
         self._current_provider = provider
+        if reasoning_effort:
+            self._reasoning_effort = str(reasoning_effort)
         self._is_cron = is_cron
         self._is_orchestrator = is_orchestrator
         if profile:
@@ -352,7 +359,10 @@ class PresenceWriter:
         # edge case where _write_state is reached with a fresh writer.
         model = self._current_model
         provider = self._current_provider
-        if (model == "unknown" or provider == "unknown") and self._state_file.exists():
+        reasoning_effort = self._reasoning_effort
+        if (
+            model == "unknown" or provider == "unknown" or not reasoning_effort
+        ) and self._state_file.exists():
             try:
                 existing = json.loads(self._state_file.read_text(encoding="utf-8"))
                 sess = existing.get("session", {})
@@ -363,6 +373,8 @@ class PresenceWriter:
                     "unknown",
                 ):
                     provider = sess["provider"]
+                if not reasoning_effort and sess.get("reasoning_effort"):
+                    reasoning_effort = str(sess["reasoning_effort"])
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -387,6 +399,7 @@ class PresenceWriter:
                 "duration_seconds": session_seconds,
                 "model": model,
                 "provider": provider,
+                "reasoning_effort": reasoning_effort,
                 "tool_calls_count": self._tool_calls_count,
                 "subagent_count": self._subagent_count,
                 "files_modified": self._files_modified,

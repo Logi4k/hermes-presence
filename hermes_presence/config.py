@@ -246,7 +246,7 @@ def _write_toml(d: dict, path: Path):
                 inner = ", ".join(
                     f'{ik} = "{iv}"' if isinstance(iv, str) else f"{ik} = {iv}" for ik, iv in v.items()
                 )
-                lines.append(f"{{ {inner} }}")
+                lines.append(f"{k} = {{ {inner} }}")
             else:
                 lines.append(f"{k} = {v}")
         lines.append("")

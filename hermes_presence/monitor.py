@@ -101,6 +101,7 @@ def _format_model_label(model: str, provider: str, show_provider: bool = True) -
         "deepseek-v4-pro": "DeepSeek V4 Pro",
         "deepseek-v4": "DeepSeek V4",
         "deepseek-r1": "DeepSeek R1",
+        "gpt-5.5": "GPT-5.5",
         "gpt-4o": "GPT-4o",
         "gpt-4.5": "GPT-4.5",
         "gpt-5": "GPT-5",
@@ -123,6 +124,7 @@ def _format_model_label(model: str, provider: str, show_provider: bool = True) -
             "deepseek": "DeepSeek",
             "anthropic": "Anthropic",
             "openai": "OpenAI",
+            "openai-codex": "Codex",
             "openrouter": "via OpenRouter",
             "google": "Google",
             "xai": "xAI",
@@ -132,6 +134,21 @@ def _format_model_label(model: str, provider: str, show_provider: bool = True) -
         label = f"{label} ({provider_display})"
 
     return label
+
+
+def _format_reasoning_label(reasoning_effort: str) -> str:
+    """Build a compact reasoning-effort label from session info."""
+    effort = str(reasoning_effort or "").strip().lower()
+    if not effort:
+        return ""
+    return {
+        "minimal": "R: minimal",
+        "low": "R: low",
+        "medium": "R: medium",
+        "high": "R: high",
+        "xhigh": "R: xhigh",
+        "none": "R: off",
+    }.get(effort, f"R: {effort}")
 
 
 def _resolve_small_icon(tool_name: str, state_name: str) -> Optional[str]:
@@ -255,6 +272,7 @@ class UnifiedMonitor:
         start_ts: int,
         buttons: list[dict],
         party_size: Optional[int] = None,
+        large_text: Optional[str] = None,
     ):
         """Push presence update to all connected pipes."""
         dead = []
@@ -264,7 +282,7 @@ class UnifiedMonitor:
                     "state": state_text,
                     "details": details,
                     "large_image": self.large_image,
-                    "large_text": self.large_text,
+                    "large_text": large_text or self.large_text,
                     "small_image": small_img,
                     "small_text": small_text,
                     "start": start_ts,
@@ -426,6 +444,19 @@ class UnifiedMonitor:
         if model_label:
             state_text = f"{state_text} -- {model_label}"
 
+        reasoning_label = _format_reasoning_label(sess.get("reasoning_effort", ""))
+        if reasoning_label:
+            state_text = f"{state_text} -- {reasoning_label}"
+
+        hover_parts = []
+        if model_label:
+            hover_parts.append(f"Model: {model_label}")
+        if reasoning_label:
+            hover_parts.append(f"Reasoning: {reasoning_label.replace('R: ', '')}")
+        calls = sess.get("tool_calls_count", 0)
+        hover_parts.append(f"Tool calls: {calls}")
+        large_text = " | ".join(hover_parts) if hover_parts else self.large_text
+
         # ---- Tool-specific icon (Tier 1, already v2) ----
         small_img = _resolve_small_icon(tool, state_name)
         small_text = tool or state_name
@@ -496,6 +527,7 @@ class UnifiedMonitor:
                 start_ts,
                 buttons,
                 party_size=party,
+                large_text=large_text,
             )
             self.last_hash = new_hash
             self._last_push_monotonic = now_mono

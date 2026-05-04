@@ -2,12 +2,13 @@
 Windows platform launcher — Task Scheduler + shell:startup.
 
 Creates a Windows Scheduled Task (triggered at user logon) and/or
-a .bat file in the Startup folder for auto-start.
+a hidden launcher in the Startup folder for auto-start.
 
 On WSL2: commands run through powershell.exe bridge automatically.
 """
 
 import os
+import ntpath
 import subprocess
 import time
 from pathlib import Path
@@ -15,6 +16,63 @@ from pathlib import Path
 from . import PlatformLauncher
 
 TASK_NAME = "HermesPresence"
+
+_IGNORED_WINDOWS_USER_DIRS = {
+    "All Users",
+    "Default",
+    "Default User",
+    "Public",
+    "WDAGUtilityAccount",
+    "desktop.ini",
+}
+
+
+def _detect_wsl() -> bool:
+    """Check if running inside WSL without depending on later module globals."""
+    try:
+        with open("/proc/version") as f:
+            content = f.read().lower()
+            return "microsoft" in content or "wsl" in content
+    except Exception:
+        return False
+
+
+def _windows_user_candidates() -> list[str]:
+    """Return likely real Windows usernames, preferring the active session."""
+    candidates: list[str] = []
+
+    def add(name: str | None) -> None:
+        if name and name not in _IGNORED_WINDOWS_USER_DIRS and name not in candidates:
+            candidates.append(name)
+
+    add(os.environ.get("WINDOWS_USER"))
+    add(os.environ.get("USERNAME"))
+
+    userprofile = os.environ.get("USERPROFILE")
+    if userprofile:
+        add(Path(userprofile).name)
+
+    if _detect_wsl():
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", "$env:USERNAME"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            add(result.stdout.strip())
+        except Exception:
+            pass
+
+    try:
+        for entry in sorted(Path("/mnt/c/Users").iterdir()):
+            if entry.is_dir() and not entry.name.startswith(".") and entry.name not in _IGNORED_WINDOWS_USER_DIRS:
+                if (entry / "AppData" / "Roaming").exists():
+                    add(entry.name)
+    except Exception:
+        pass
+
+    return candidates
 
 
 def _resolve_appdata() -> str:
@@ -24,15 +82,11 @@ def _resolve_appdata() -> str:
     if raw and Path(raw).exists():
         return raw
 
-    # 2. WSL: read the Windows username from /mnt/c/Users, then check AppData
-    try:
-        for entry in sorted(Path("/mnt/c/Users").iterdir()):
-            if entry.is_dir() and not entry.name.startswith("."):
-                candidate = entry / "AppData" / "Roaming"
-                if candidate.exists():
-                    return str(candidate)
-    except Exception:
-        pass
+    # 2. WSL: prefer active Windows user, then scan real user directories.
+    for username in _windows_user_candidates():
+        candidate = Path("/mnt/c/Users") / username / "AppData" / "Roaming"
+        if candidate.exists():
+            return str(candidate)
 
     # 3. Last resort — WSL-side fallback (functional for mirror writes via hook.py)
     return os.path.expanduser("~/.hermes/state")
@@ -40,17 +94,9 @@ def _resolve_appdata() -> str:
 
 def _find_windows_username() -> str:
     """Discover the Windows username from WSL or native env."""
-    userprofile = os.environ.get("USERPROFILE")
-    if userprofile:
-        return Path(userprofile).name
-    # WSL: first directory in /mnt/c/Users that has AppData
-    try:
-        for entry in sorted(Path("/mnt/c/Users").iterdir()):
-            if entry.is_dir() and not entry.name.startswith("."):
-                if (entry / "AppData" / "Roaming").exists():
-                    return entry.name
-    except Exception:
-        pass
+    candidates = _windows_user_candidates()
+    if candidates:
+        return candidates[0]
     return os.environ.get("USER", "unknown")
 
 
@@ -72,14 +118,82 @@ def _wsl_to_win_path(wsl_path: str) -> str:
     return wsl_path.replace("/", "\\")
 
 
+def _win_to_wsl_path(win_path: str) -> str:
+    """Convert C:\\Users\\... to /mnt/c/Users/... when checking from WSL."""
+    if len(win_path) >= 3 and win_path[1:3] in {":\\", ":/"}:
+        drive = win_path[0].lower()
+        rest = win_path[3:].replace("\\", "/")
+        return f"/mnt/{drive}/{rest}"
+    return win_path
+
+
+def _windows_path_exists(path: str) -> bool:
+    """Check Windows paths correctly when this launcher is running inside WSL."""
+    try:
+        if Path(path).exists():
+            return True
+    except Exception:
+        pass
+    if _is_wsl():
+        try:
+            return Path(_win_to_wsl_path(path)).exists()
+        except Exception:
+            return False
+    return False
+
+
+def _current_reasoning_effort() -> str:
+    """Best-effort fallback reasoning level to bake into the Windows monitor."""
+    for var in ("HERMES_REASONING_EFFORT", "HERMES_REASONING"):
+        value = os.environ.get(var, "").strip()
+        if value:
+            return value
+
+    try:
+        import yaml
+
+        cfg_path = Path.home() / ".hermes" / "config.yaml"
+        if cfg_path.exists():
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            value = str((cfg.get("agent") or {}).get("reasoning_effort", "") or "").strip()
+            if value:
+                return value
+    except Exception:
+        pass
+
+    return ""
+
+
+def _pythonw_path(python_path: str) -> str:
+    """Prefer pythonw.exe on Windows so the monitor never owns a console."""
+    clean = python_path.replace("\\\\", "\\")
+    if _is_wsl() and clean.startswith("/mnt/"):
+        clean = _wsl_to_win_path(clean)
+    if clean.lower() == "python":
+        return "pythonw"
+
+    basename = ntpath.basename(clean).lower()
+    if basename == "pythonw.exe":
+        return clean
+    if basename == "python.exe":
+        candidate = ntpath.join(ntpath.dirname(clean), "pythonw.exe")
+        return candidate if _windows_path_exists(candidate) else clean
+    return clean
+
+
+def _startup_launcher_vbs_content(python_path: str, monitor_path: str) -> str:
+    """Create a no-console Startup launcher for Windows logon."""
+    command = f'"{_pythonw_path(python_path)}" "{monitor_path}"'
+    escaped_command = command.replace('"', '""')
+    return (
+        'Set WshShell = CreateObject("WScript.Shell")\n'
+        f'WshShell.Run "{escaped_command}", 0, False\n'
+    )
+
+
 def _is_wsl() -> bool:
     """Check if running inside WSL."""
-    try:
-        with open("/proc/version") as f:
-            content = f.read().lower()
-            return "microsoft" in content or "wsl" in content
-    except Exception:
-        return False
+    return _detect_wsl()
 
 
 def _run_win(cmd: list, timeout: int = 15) -> subprocess.CompletedProcess:
@@ -116,9 +230,27 @@ class WindowsLauncher(PlatformLauncher):
         self._monitor_target = Path(_APPDATA) / (
             f"{profile}_presence_monitor.py" if profile != "main" else "hermes_presence_monitor.py"
         )
+        self._startup_script_name = (
+            f"{profile}_presence.vbs" if profile != "main" else "hermes_presence.vbs"
+        )
         self._startup_bat_name = (
             f"{profile}_presence.bat" if profile != "main" else "hermes_presence.bat"
         )
+
+    def _legacy_task_names(self) -> tuple[str, ...]:
+        if self.profile == "main":
+            return ("Hermes Presence Monitor",)
+        return (f"Hermes Presence {self.profile.capitalize()}",)
+
+    def _disable_legacy_tasks(self) -> None:
+        """Disable old task names so upgrades do not leave duplicate pollers running."""
+        for task_name in self._legacy_task_names():
+            if task_name == self._task_name:
+                continue
+            try:
+                _run_win(["schtasks", "/Change", "/TN", task_name, "/Disable"], timeout=10)
+            except Exception:
+                pass
 
     def _find_python(self) -> str:
         """Locate Python on Windows. Uses cached result, then a priority chain:
@@ -135,13 +267,13 @@ class WindowsLauncher(PlatformLauncher):
 
         # 1. Hermes venv — resolve dynamically
         username = _find_windows_username()
-        hermes_venv = Path(f"C:\\Users\\{username}\\.hermes\\hermes-agent\\venv\\Scripts\\python.exe")
-        if hermes_venv.exists():
-            candidates.append(str(hermes_venv))
+        hermes_venv = f"C:\\Users\\{username}\\.hermes\\hermes-agent\\venv\\Scripts\\python.exe"
+        if _windows_path_exists(hermes_venv):
+            candidates.append(hermes_venv)
         # Also try pipx-style install
-        pipx_venv = Path(f"C:\\Users\\{username}\\.hermes\\hermes-agent\\.venv\\Scripts\\python.exe")
-        if pipx_venv.exists():
-            candidates.append(str(pipx_venv))
+        pipx_venv = f"C:\\Users\\{username}\\.hermes\\hermes-agent\\.venv\\Scripts\\python.exe"
+        if _windows_path_exists(pipx_venv):
+            candidates.append(pipx_venv)
 
         # 2. Common install locations
         for ver in range(13, 8, -1):  # 3.13 down to 3.9
@@ -178,9 +310,8 @@ class WindowsLauncher(PlatformLauncher):
             pass
 
         for c in candidates:
-            p = Path(c) if "\\" in c else Path(c.replace("\\", "/"))
             try:
-                if p.exists():
+                if _windows_path_exists(c):
                     _CACHED_PYTHON = c
                     return c
             except Exception:
@@ -188,23 +319,51 @@ class WindowsLauncher(PlatformLauncher):
 
         return "python"
 
+    def _monitor_process_name(self) -> str:
+        return f"{self.profile}_presence_monitor" if self.profile != "main" else "hermes_presence_monitor"
+
+    def _startup_script_path(self) -> Path:
+        return STARTUP_DIR / self._startup_script_name
+
+    def _legacy_bat_path(self) -> Path:
+        return STARTUP_DIR / self._startup_bat_name
+
+    def _start_startup_launcher(self) -> bool:
+        startup_script = self._startup_script_path()
+        if startup_script.exists():
+            win_script_path = _wsl_to_win_path(str(startup_script))
+            result = _run_win(["wscript", win_script_path], timeout=10)
+            return result.returncode == 0
+
+        legacy_bat = self._legacy_bat_path()
+        if legacy_bat.exists():
+            win_bat_path = _wsl_to_win_path(str(legacy_bat))
+            result = _run_win(["cmd", "/c", win_bat_path], timeout=10)
+            return result.returncode == 0
+
+        return False
+
     def install(self) -> bool:
         """Install via Scheduled Task (most reliable), with shell:startup fallback."""
         python_path = self._find_python()
+        hidden_python_path = _pythonw_path(python_path)
         # Convert paths for Windows-native commands
-        win_target = _wsl_to_win_path(str(MONITOR_TARGET))
+        win_target = _wsl_to_win_path(str(self._monitor_target))
 
         # Write the monitor runner script to %APPDATA%
         monitor_script = _monitor_script_content(
             client_id=self.client_id,
             state_file=str(self.state_file),
             profile=self.profile,
+            fallback_reasoning_effort=_current_reasoning_effort(),
         )
         try:
             self._monitor_target.parent.mkdir(parents=True, exist_ok=True)
             self._monitor_target.write_text(monitor_script, encoding="utf-8")
         except Exception:
             pass
+
+        self._disable_legacy_tasks()
 
         # Method 1: Try Scheduled Task (needs admin on some systems)
         try:
@@ -217,7 +376,7 @@ class WindowsLauncher(PlatformLauncher):
                     "/SC",
                     "ONLOGON",
                     "/TR",
-                    f'"{python_path}" "{win_target}"',
+                    f'"{hidden_python_path}" "{win_target}"',
                     "/F",
                     "/RL",
                     "LIMITED",
@@ -234,25 +393,29 @@ class WindowsLauncher(PlatformLauncher):
         except Exception as e:
             print(f"[INFO] schtasks failed (will use startup folder fallback): {e}")
 
-        # Method 2: Fallback — shell:startup .bat file (no admin needed)
+        # Method 2: Fallback — shell:startup .vbs file (no admin needed, no console)
         try:
-            startup_bat = STARTUP_DIR / self._startup_bat_name
-            py_path_clean = python_path.replace("\\\\", "\\")
-            win_bat_path = _wsl_to_win_path(str(startup_bat))
-            bat_content = f'''@echo off
-REM Hermes Presence — auto-start (shell:startup)
-start "" /B "{py_path_clean}" "{win_target}"
-'''
+            startup_script = self._startup_script_path()
+            legacy_bat = self._legacy_bat_path()
+            py_path_clean = hidden_python_path.replace("\\\\", "\\")
+            win_script_path = _wsl_to_win_path(str(startup_script))
+            vbs_content = _startup_launcher_vbs_content(py_path_clean, win_target)
             STARTUP_DIR.mkdir(parents=True, exist_ok=True)
-            startup_bat.write_text(bat_content)
-            print(f"[OK] Startup .bat created at {win_bat_path}")
+            startup_script.write_text(vbs_content)
+
+            # Disable the old .bat fallback if present; otherwise it will still flash cmd.exe.
+            if legacy_bat.exists():
+                legacy_backup = legacy_bat.with_suffix(legacy_bat.suffix + ".disabled")
+                legacy_bat.replace(legacy_backup)
+
+            print(f"[OK] Hidden Startup launcher created at {win_script_path}")
 
             # Also start it now
             try:
-                _run_win(["cmd", "/c", win_bat_path])
-                print("[OK] Monitor started via startup .bat")
+                _run_win(["wscript", win_script_path])
+                print("[OK] Monitor started via hidden Startup launcher")
             except Exception as e:
-                print(f"[WARN] Could not start via .bat: {e}")
+                print(f"[WARN] Could not start via hidden Startup launcher: {e}")
 
             return True
         except Exception as e:
@@ -265,6 +428,9 @@ start "" /B "{py_path_clean}" "{win_target}"
         except Exception:
             pass
         self._monitor_target.unlink(missing_ok=True)
+        self._startup_script_path().unlink(missing_ok=True)
+        self._legacy_bat_path().unlink(missing_ok=True)
+        self._legacy_bat_path().with_suffix(self._legacy_bat_path().suffix + ".disabled").unlink(missing_ok=True)
         return not self.is_installed()
 
     def is_installed(self) -> bool:
@@ -274,23 +440,46 @@ start "" /B "{py_path_clean}" "{win_target}"
                 return True
         except Exception:
             pass
-        # Check for startup .bat fallback
-        startup_bat = STARTUP_DIR / self._startup_bat_name
-        return startup_bat.exists()
+        # Check for startup fallback
+        startup_script = self._startup_script_path()
+        startup_bat = self._legacy_bat_path()
+        return startup_script.exists() or startup_bat.exists()
 
     def start(self) -> bool:
         try:
             result = _run_win(["schtasks", "/Run", "/TN", self._task_name], timeout=10)
-            return result.returncode == 0
+            if result.returncode == 0:
+                return True
         except Exception:
-            return False
+            pass
+        return self._start_startup_launcher()
 
     def stop(self) -> bool:
+        stopped = False
         try:
             result = _run_win(["schtasks", "/End", "/TN", self._task_name], timeout=10)
-            return result.returncode == 0
+            stopped = result.returncode == 0
         except Exception:
-            return False
+            pass
+
+        try:
+            monitor_name = self._monitor_process_name().replace("'", "''")
+            ps_cmd = (
+                "Get-WmiObject Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | "
+                f"Where-Object {{ $_.CommandLine -match '{monitor_name}' }} | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $($_.ProcessId) }"
+            )
+            result = subprocess.run(
+                ["powershell.exe" if _is_wsl() else "powershell", "-Command", ps_cmd],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            stopped = stopped or bool(result.stdout.strip())
+        except Exception:
+            pass
+
+        return stopped
 
     def status(self) -> dict:
         running = False
@@ -306,11 +495,7 @@ start "" /B "{py_path_clean}" "{win_target}"
         # Method 2: Fallback — check if any python process is running the presence monitor
         if not running:
             try:
-                monitor_name = (
-                    f"{self.profile}_presence_monitor"
-                    if self.profile != "main"
-                    else "hermes_presence_monitor"
-                )
+                monitor_name = self._monitor_process_name()
                 ps_cmd = (
                     "Get-WmiObject Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | "
                     "Select-Object ProcessId, CommandLine | "
@@ -358,7 +543,12 @@ start "" /B "{py_path_clean}" "{win_target}"
         }
 
 
-def _monitor_script_content(client_id: str, state_file: str, profile: str = "main") -> str:
+def _monitor_script_content(
+    client_id: str,
+    state_file: str,
+    profile: str = "main",
+    fallback_reasoning_effort: str = "",
+) -> str:
     mirror_name = "hermes_presence.json" if profile == "main" else f"{profile}_presence.json"
     return f'''"""
 Hermes Presence Monitor v3.1.2 — Windows auto-start script (all-pipe).
@@ -382,6 +572,7 @@ except ImportError:
 
 CLIENT_ID = "{client_id}"
 STATE_FILE = Path(os.environ.get("APPDATA", "")) / "{mirror_name}"
+DEFAULT_REASONING_EFFORT = "{fallback_reasoning_effort}"
 PIPES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 # Tool → small_image icon (Discord asset names — must exist in Developer Portal)
@@ -440,8 +631,17 @@ MODEL_SHORT = {{
     "claude-opus-4": "Claude Opus 4",
     "deepseek-v4-pro": "DeepSeek V4 Pro",
     "deepseek-v4": "DeepSeek V4",
+    "gpt-5.5": "GPT-5.5",
     "gpt-4o": "GPT-4o",
     "gpt-5": "GPT-5",
+}}
+
+PROVIDER_SHORT = {{
+    "openai-codex": "Codex",
+    "openai": "OpenAI",
+    "openrouter": "OpenRouter",
+    "anthropic": "Anthropic",
+    "deepseek": "DeepSeek",
 }}
 
 
@@ -478,14 +678,36 @@ def _resolve_small_icon(tool_name):
 
 def _format_model_label(model, provider):
     """Build a compact model label."""
+    label = ""
     if model:
         for long, short in MODEL_SHORT.items():
             if long in model.lower():
-                return short
-        return model
-    if provider:
-        return provider.capitalize()
-    return ""
+                label = short
+                break
+        if not label:
+            label = model
+    elif provider:
+        label = PROVIDER_SHORT.get(provider.lower(), provider.capitalize())
+
+    if label and provider:
+        provider_label = PROVIDER_SHORT.get(provider.lower(), provider.capitalize())
+        if provider_label.lower() not in label.lower():
+            label = f"{{label}} ({{provider_label}})"
+    return label
+
+
+def _format_reasoning_label(reasoning_effort):
+    effort = str(reasoning_effort or "").strip().lower()
+    if not effort:
+        return ""
+    return {{
+        "minimal": "R: minimal",
+        "low": "R: low",
+        "medium": "R: medium",
+        "high": "R: high",
+        "xhigh": "R: xhigh",
+        "none": "R: off",
+    }}.get(effort, f"R: {{effort}}")
 
 
 print("[MONITOR] Starting Hermes Presence v3.1.2 (all-pipe)", flush=True)
@@ -605,6 +827,7 @@ while True:
 
         model = sess.get("model", "")
         provider = sess.get("provider", "")
+        reasoning_effort = sess.get("reasoning_effort", "") or DEFAULT_REASONING_EFFORT
         calls = sess.get("tool_calls_count", 0)
         subs = sess.get("subagent_count", 0)
         started_at = sess.get("started_at", "")
@@ -615,6 +838,9 @@ while True:
         model_label = _format_model_label(model, provider)
         if model_label:
             state_text = f"{{state_text}} | {{model_label}}"
+        reasoning_label = _format_reasoning_label(reasoning_effort)
+        if reasoning_label:
+            state_text = f"{{state_text}} | {{reasoning_label}}"
 
         # Details
         if detail and len(detail) > 128:
@@ -635,9 +861,15 @@ while True:
             start_ts = _iso_to_epoch(started_at) if started_at else int(time.time())
 
         # Hover text
-        hover_parts = [f"model: {{model or 'hermes'}}"]
+        hover_parts = []
+        if model_label:
+            hover_parts.append(f"Model: {{model_label}}")
+        elif model:
+            hover_parts.append(f"Model: {{model}}")
+        if reasoning_label:
+            hover_parts.append(f"Reasoning: {{reasoning_label.replace('R: ', '')}}")
         if provider:
-            hover_parts.append(f"provider: {{provider}}")
+            hover_parts.append(f"Provider: {{provider}}")
         hover_parts.append(f"tool calls: {{calls}}")
         if subs > 0:
             hover_parts.append(f"sub-agents: {{subs}}")
@@ -650,7 +882,7 @@ while True:
 
         # Hash check. Include session identity so Hermes restarts with the same
         # visible idle state still repush presence after Discord/Hermes restart.
-        new_hash = f"{{state_text}}|{{details}}|{{tool}}|{{session_id}}|{{started_at}}|{{calls}}|{{subs}}|{{tool_started_at}}"
+        new_hash = f"{{state_text}}|{{details}}|{{tool}}|{{session_id}}|{{started_at}}|{{calls}}|{{subs}}|{{tool_started_at}}|{{reasoning_effort}}"
         now_mono = time.monotonic()
         should_republish = (now_mono - last_push_monotonic) >= REPUBLISH_INTERVAL
         if new_hash != last_hash or should_republish:
@@ -658,7 +890,7 @@ while True:
                 "state": state_text,
                 "details": details,
                 "large_image": large_image,
-                "large_text": "Hermes Agent",
+                "large_text": " | ".join(hover_parts) if hover_parts else "Hermes Agent",
                 "small_image": small_image,
                 "small_text": small_text,
                 "start": start_ts,

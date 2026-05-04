@@ -35,6 +35,7 @@ def _write_state(path: Path, *, session_id="s1", started_at="2026-05-03T12:00:00
             "started_at": started_at,
             "model": "deepseek-v4-pro",
             "provider": "deepseek",
+            "reasoning_effort": "high",
             "tool_calls_count": 0,
             "subagent_count": 0,
             "files_modified": 0,
@@ -91,3 +92,17 @@ def test_thinking_presence_uses_answering_copy(tmp_path, monkeypatch):
 
     assert rpc.updates[0]["state"].startswith("Answering")
     assert rpc.updates[0]["details"] == "Composing reply"
+
+
+def test_presence_includes_model_and_reasoning_in_state_and_hover(tmp_path, monkeypatch):
+    state_file = tmp_path / "presence.json"
+    _write_state(state_file, state="working", detail="Executing Python")
+    m, rpc = _monitor(tmp_path, monkeypatch)
+
+    m._poll_once()
+
+    update = rpc.updates[0]
+    assert "DeepSeek V4 Pro" in update["state"]
+    assert "R: high" in update["state"]
+    assert "Model: DeepSeek V4 Pro" in update["large_text"]
+    assert "Reasoning: high" in update["large_text"]

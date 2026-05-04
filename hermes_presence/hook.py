@@ -43,6 +43,38 @@ _PROFILE = os.environ.get("HERMES_PROFILE", "main")
 _STATE_FILE = get_state_file_path(_PROFILE)
 
 
+def _reasoning_effort_from_agent(agent=None) -> str:
+    """Return active reasoning effort from agent/config/env without raising."""
+    if agent is not None:
+        try:
+            reasoning_config = getattr(agent, "reasoning_config", None)
+            if isinstance(reasoning_config, dict) and reasoning_config.get("enabled") is not False:
+                effort = str(reasoning_config.get("effort", "") or "").strip()
+                if effort:
+                    return effort
+        except Exception:
+            pass
+
+    for var in ("HERMES_REASONING_EFFORT", "HERMES_REASONING"):
+        effort = os.environ.get(var, "").strip()
+        if effort:
+            return effort
+
+    try:
+        import yaml
+
+        cfg_path = Path.home() / ".hermes" / "config.yaml"
+        if cfg_path.exists():
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            effort = str((cfg.get("agent") or {}).get("reasoning_effort", "") or "").strip()
+            if effort:
+                return effort
+    except Exception:
+        pass
+
+    return ""
+
+
 def on_session_start(context: dict):
     """
     Called when a Hermes conversation session starts (or user sends first message).
@@ -61,6 +93,7 @@ def on_session_start(context: dict):
     model = context.get("model", os.environ.get("HERMES_MODEL", "unknown"))
     provider = context.get("provider", os.environ.get("HERMES_PROVIDER", "unknown"))
     thinking = context.get("thinking", False)
+    reasoning_effort = context.get("reasoning_effort") or _reasoning_effort_from_agent()
 
     writer.set_session(
         model=model,
@@ -69,6 +102,7 @@ def on_session_start(context: dict):
         is_cron=_IS_CRON,
         is_orchestrator=_IS_ORCHESTRATOR,
         profile=_PROFILE,
+        reasoning_effort=reasoning_effort,
     )
 
     _mirror_to_windows_if_wsl()
@@ -168,14 +202,16 @@ def on_model_info(context: dict):
 
     model = context.get("model", "")
     provider = context.get("provider", "")
+    reasoning_effort = context.get("reasoning_effort") or _reasoning_effort_from_agent()
     cost = context.get("cost_usd")
 
-    if model or provider:
+    if model or provider or reasoning_effort:
         writer.set_session(
             model=model or writer._current_model,
             provider=provider or writer._current_provider,
             is_cron=_IS_CRON,
             is_orchestrator=_IS_ORCHESTRATOR,
+            reasoning_effort=reasoning_effort,
         )
 
     if cost is not None:
@@ -386,6 +422,7 @@ def auto_setup(agent=None):
     # Extract model/provider from agent if available
     model = os.environ.get("HERMES_MODEL", "unknown")
     provider = os.environ.get("HERMES_PROVIDER", "unknown")
+    reasoning_effort = _reasoning_effort_from_agent(agent)
 
     if agent is not None:
         try:
@@ -400,6 +437,7 @@ def auto_setup(agent=None):
         is_cron=_IS_CRON,
         is_orchestrator=_IS_ORCHESTRATOR,
         profile=_PROFILE,
+        reasoning_effort=reasoning_effort,
     )
     writer.idle()
     _mirror_to_windows_if_wsl()

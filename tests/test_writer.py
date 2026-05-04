@@ -33,6 +33,25 @@ def test_thinking_uses_polished_detail():
         assert "Generating response" not in data["activity"]["detail"]
 
 
+def test_writer_persists_and_restores_reasoning_effort():
+    with tempfile.TemporaryDirectory() as tmp:
+        state_file = Path(tmp) / "presence.json"
+        writer = PresenceWriter(state_file=state_file)
+        writer.set_session("gpt-5.5", "openai-codex", reasoning_effort="high")
+        writer.idle()
+
+        data = json.loads(state_file.read_text())
+        assert data["session"]["reasoning_effort"] == "high"
+
+        fresh_writer = PresenceWriter(state_file=state_file)
+        fresh_writer.tool_call("terminal", {"command": "pwd"})
+
+        data = json.loads(state_file.read_text())
+        assert data["session"]["model"] == "gpt-5.5"
+        assert data["session"]["provider"] == "openai-codex"
+        assert data["session"]["reasoning_effort"] == "high"
+
+
 def test_process_tool_has_specific_label():
     with tempfile.TemporaryDirectory() as tmp:
         state_file = Path(tmp) / "presence.json"
