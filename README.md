@@ -172,12 +172,26 @@ pip install -e ".[dev]"
 ### Running checks
 
 ```bash
-ruff check hermes_presence/
-ruff format --check hermes_presence/
-mypy hermes_presence/ --ignore-missing-imports
+make ci
 ```
 
-CI runs these same checks on every push.
+This runs the same gates as GitHub Actions via `scripts/ci-check.sh`:
+
+```bash
+ruff check hermes_presence/ --select I,F,E,W
+mypy hermes_presence/ --ignore-missing-imports
+pytest tests/ -v
+```
+
+Use focused targets while developing:
+
+```bash
+make lint
+make typecheck
+make test
+```
+
+CI calls the same script on every push, so local and GitHub checks stay aligned.
 
 ### Debugging
 

@@ -13,10 +13,12 @@ pip install -e ".[dev]"
 1. Fork and clone the repo
 2. Install dev dependencies: `pip install -e ".[dev]"`
 3. Make changes in a feature branch
-4. Run lint: `ruff check hermes_presence/`
-5. Run type checks: `mypy hermes_presence/`
-6. Run tests: `pytest tests/`
-7. Open a PR
+4. Run the full local CI mirror: `make ci`
+5. Or run focused checks:
+   - `make lint`
+   - `make typecheck`
+   - `make test`
+6. Open a PR
 
 ## Code Style
 
