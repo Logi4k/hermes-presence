@@ -72,6 +72,8 @@ def _cmd_status(args):
     if json_mode:
         import json as _json
 
+        from .tui_sessions import detect_tui_sessions
+
         result = {
             "client_id_set": bool(cfg.discord.client_id),
             "state_file": str(state_file),
@@ -85,6 +87,7 @@ def _cmd_status(args):
             "excluded_tools": cfg.tools.exclude,
             "service": {"running": False, "auto_start": False, "pid": None, "pid_age_s": None},
             "session": None,
+            "tui_sessions": detect_tui_sessions(),
         }
 
         # Platform service status
@@ -234,6 +237,31 @@ def _cmd_status(args):
                 print(f"  Last update:  {dt.strftime('%H:%M:%S')}")
             except Exception:
                 pass
+        print()
+
+    from .tui_sessions import detect_tui_sessions
+
+    tui = detect_tui_sessions()
+    if tui.get("running") or verbose:
+        print("TUI Sessions")
+        print("-" * 40)
+        print(f"  Hermes TUI processes:     {tui.get('count', 0)}")
+        print(f"  Windows Terminal tabs:    {tui.get('windows_terminal_tab_count', 0)}")
+
+        for session in tui.get("linux_sessions", [])[:5]:
+            label = session.get("session_id") or "unknown-session"
+            cwd = session.get("cwd") or "unknown cwd"
+            print(f"  PID {session.get('pid')}: {label} @ {cwd}")
+
+        tabs = tui.get("windows_terminal_tabs", [])
+        if verbose and tabs:
+            print("  Windows Terminal WSL targets:")
+            for tab in tabs[:5]:
+                target = tab.get("tmux_session") or tab.get("cwd") or "wsl tab"
+                print(f"    PID {tab.get('pid')}: {target}")
+
+        for warning in tui.get("warnings", []):
+            print(f"  Warning: {warning}")
         print()
 
 
@@ -481,7 +509,6 @@ def _cmd_restart(args):
         print("[WARN] Monitor may not have restarted. Try 'hermes-presence install --force'.")
 
 
-
 def _cmd_doctor(args):
     """Diagnose common startup and runtime problems."""
     from .installer import _detect_platform
@@ -518,6 +545,7 @@ def _cmd_cleanup_profiles(args):
             print(f"  {item}")
     else:
         print("No stale profile artifacts found.")
+
 
 def _get_launcher(platform: str, client_id: str, state_file, profile: str = "main"):
     """Get the platform launcher for the given OS."""
