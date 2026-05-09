@@ -538,9 +538,13 @@ def _cmd_cleanup_profiles(args):
 
 
 def _cmd_cleanup_state(args):
-    """Force cleanup of stale per-session state files."""
+    """Force cleanup of stale per-session state files, optionally as dry-run."""
+    import json
+    from datetime import datetime, timezone
+
     from .config import get_state_file_path
     from .monitor import _cleanup_stale_state_files
+
 
     max_age = getattr(args, "max_age_seconds", 3600)
     if max_age <= 0:
@@ -549,6 +553,30 @@ def _cmd_cleanup_state(args):
 
     state_file = get_state_file_path(profile=getattr(args, "profile", "main"))
     state_dir = Path(getattr(args, "state_dir") or state_file.parent)
+    dry_run = bool(getattr(args, "dry_run", False))
+
+    if dry_run:
+        stale_files = []
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age
+        for f in state_dir.glob("presence_*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+                ts_str = data.get("timestamp", "")
+                if not ts_str:
+                    continue
+                ts = datetime.fromisoformat(ts_str)
+                if ts.timestamp() < cutoff:
+                    stale_files.append(f)
+            except (json.JSONDecodeError, ValueError, OSError):
+                continue
+
+        if stale_files:
+            print(f"Would remove {len(stale_files)} stale state file(s) older than {max_age}s:")
+            for stale_file in stale_files:
+                print(f"  {stale_file}")
+        else:
+            print("No stale state files found.")
+        return
 
     removed = _cleanup_stale_state_files(state_dir=state_dir, max_age_seconds=max_age)
     if removed:
@@ -767,6 +795,11 @@ def main():
         type=int,
         default=3600,
         help="Delete files older than this many seconds (default: 3600)",
+    )
+    p_state_cleanup.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List stale files without deleting",
     )
 
     args = parser.parse_args()

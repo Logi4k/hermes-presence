@@ -93,7 +93,7 @@ The hook fires after every LLM call: extracts model, provider, reasoning effort,
 | `hermes-presence validate` | Run diagnostic checks (pip, Discord, WSL bridge) |
 | `hermes-presence doctor --fix` | Diagnose and safely clean visible Windows startup launchers and old tasks |
 | `hermes-presence cleanup-profiles clinical` | Remove stale Windows launchers/monitors for a named profile |
-| `hermes-presence cleanup-state` | Remove stale per-session state files from the resolved state directory |
+| `hermes-presence cleanup-state [--dry-run]` | Preview or remove stale per-session state files from the resolved state directory |
 | `hermes-presence config` | Show current configuration |
 | `hermes-presence config set <key> <value>` | Update config (e.g., `display.idle_timeout 20`) |
 | `hermes-presence run` | Run monitor in foreground for debugging |

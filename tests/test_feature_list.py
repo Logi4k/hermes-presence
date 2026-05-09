@@ -195,6 +195,40 @@ def test_cleanup_state_command_rejects_non_positive_max_age(monkeypatch, tmp_pat
         app._cmd_cleanup_state(args)
 
 
+def test_cleanup_state_command_dry_run_keeps_files(monkeypatch, tmp_path, capsys):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    now = datetime.now(timezone.utc)
+
+    stale = state_dir / "presence_stale.json"
+    fresh = state_dir / "presence_fresh.json"
+    _write_state_file(stale, "idle", now=now - timedelta(hours=2))
+    _write_state_file(fresh, "working", now=now)
+
+    monkeypatch.setattr(
+        config_mod,
+        "get_state_file_path",
+        lambda profile="main": state_dir / "presence.json",
+    )
+
+    args = type(
+        "Args",
+        (),
+        {
+            "profile": "main",
+            "state_dir": str(state_dir),
+            "max_age_seconds": 3600,
+            "dry_run": True,
+        },
+    )()
+    app._cmd_cleanup_state(args)
+
+    output = capsys.readouterr().out
+    assert "Would remove 1 stale state file(s)" in output
+    assert stale.exists()
+    assert fresh.exists()
+
+
 def test_update_command_can_restart_monitor(monkeypatch):
     calls = []
 
