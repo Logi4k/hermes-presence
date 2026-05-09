@@ -175,7 +175,7 @@ def install(
 
     Returns True if successful, False on critical failure.
     """
-    print("Hermes Presence Installer v3.2.0" + (f" (profile: {profile})" if profile != "main" else ""))
+    print("Hermes Presence Installer v3.3.0" + (f" (profile: {profile})" if profile != "main" else ""))
     print("=" * 40)
 
     platform = _detect_platform()
@@ -188,7 +188,13 @@ def install(
         print("[ERROR] pypresence is required. Install with: pip install pypresence")
         return False
 
-    # Step 1: Discord setup
+    # Step 1: Discord setup (skip prompt on force if client_id known)
+    if force and not client_id:
+        from .config import load_config
+        cached = load_config()
+        if cached.discord.client_id:
+            client_id = cached.discord.client_id
+            print(f"[INFO] Using cached client_id (force mode): {client_id}")
     client_id = _walk_discord_setup(client_id)
 
     # Step 2: Save config

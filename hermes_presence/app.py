@@ -449,32 +449,23 @@ def _cmd_version(args):
 
 
 def _cmd_update(args):
-    """Self-update hermes-presence from GitHub."""
-
-    print("Updating hermes-presence...")
+    """Update: re-deploy monitor script and restart — alias for install --force + restart."""
+    print("Updating hermes-presence monitor...")
     print("=" * 40)
 
-    # Try pip install --upgrade from GitHub
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--upgrade",
-        "git+https://github.com/Logi4k/hermes-presence.git@main",
-    ]
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=False)
-    if result.returncode != 0:
-        print("[FAIL] Update failed. Check pip output above.")
-        sys.exit(1)
+    # Step 1: Re-install (forces monitor script re-generation)
+    from .installer import install
 
-    print()
-    print("[DONE] hermes-presence updated to latest.")
-    if getattr(args, "restart", False):
-        _cmd_restart(args)
-    else:
-        print("Run 'hermes-presence restart' to restart the monitor.")
+    profile = getattr(args, "profile", "main")
+    install(
+        client_id=getattr(args, "client_id", None),
+        force=True,
+        no_start=False,
+        profile=profile,
+    )
+
+    # Step 2: Restart the monitor
+    _cmd_restart(args)
 
 
 def _cmd_restart(args):
@@ -637,7 +628,6 @@ def _cmd_validate(args):
 
     # Check 5: powershell.exe on WSL/Windows
     try:
-        import subprocess
 
         result = subprocess.run(
             ["powershell.exe", "-Command", "echo ok"],
@@ -726,9 +716,8 @@ def main():
     subparsers.add_parser("validate", help="Validate installation")
 
     # update subcommand
-    p_update = subparsers.add_parser("update", help="Self-update from GitHub")
-    p_update.add_argument("--restart", action="store_true", help="Restart monitor after update")
-    p_update.add_argument("--profile", default="main", help="Profile to restart after update")
+    p_update = subparsers.add_parser("update", help="Re-deploy monitor script and restart")
+    p_update.add_argument("--profile", default="main", help="Profile to update (default: main)")
 
     # restart subcommand
     p_restart = subparsers.add_parser("restart", help="Restart the monitor")

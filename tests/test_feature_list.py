@@ -132,18 +132,19 @@ def test_cleanup_profiles_removes_stale_windows_profile_artifacts(monkeypatch, t
 def test_update_command_can_restart_monitor(monkeypatch):
     calls = []
 
-    def fake_run(cmd, capture_output=False):
-        calls.append(cmd)
-        return type("R", (), {"returncode": 0})()
+    def fake_install(client_id=None, force=False, no_start=False, profile="main"):
+        calls.append(("install", force, profile))
+        return True
 
-    monkeypatch.setattr(app.subprocess, "run", fake_run, raising=False)
-    monkeypatch.setattr(app, "_cmd_restart", lambda args: calls.append(["restart"]))
+    monkeypatch.setattr(app, "_cmd_restart", lambda args: calls.append(("restart", getattr(args, "profile", "main"))))
+    monkeypatch.setattr("hermes_presence.installer.install", fake_install)
 
     args = Args()
-    args.restart = True
+    args.client_id = None
     app._cmd_update(args)
 
-    assert ["restart"] in calls
+    assert ("install", True, "main") in calls
+    assert ("restart", "main") in calls
 
 
 def test_release_workflow_exists_and_builds_package():
