@@ -306,7 +306,7 @@ def on_shutdown(context: dict):
 
 
 def _mirror_to_windows_if_wsl():
-    """Mirror state file to Windows side if running on WSL."""
+    """Mirror state file to Windows side if running on WSL, using per-session filename."""
     if not _is_wsl():
         return
 
@@ -324,8 +324,10 @@ def _mirror_to_windows_if_wsl():
             return
 
         windows_appdata = Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
-        # Profile-specific Windows mirror path
-        if _PROFILE == "main":
+        # Session-aware mirror name: presence_{session_id}.json or legacy fallback
+        if _SESSION_ID:
+            mirror_name = f"presence_{_SESSION_ID}.json"
+        elif _PROFILE == "main":
             mirror_name = "hermes_presence.json"
         else:
             mirror_name = f"{_PROFILE}_presence.json"
