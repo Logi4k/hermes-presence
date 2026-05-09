@@ -517,6 +517,15 @@ class UnifiedMonitor:
                 continue
 
             try:
+                # Remove stale per-session state files before reading latest activity.
+                stale_removed = _cleanup_stale_state_files(self.state_file.parent)
+                if stale_removed and self.logger:
+                    self.logger.log_event(
+                        "state_cleanup",
+                        {
+                            "removed_files": stale_removed,
+                        },
+                    )
                 self._poll_once()
             except Exception as e:
                 print(f"[err] {e}", flush=True)
