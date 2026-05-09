@@ -603,7 +603,7 @@ except ImportError:
     sys.exit(1)
 
 CLIENT_ID = "{client_id}"
-STATE_FILE = Path(os.environ.get("APPDATA", "")) / "{mirror_name}"
+STATE_DIR = Path(os.environ.get("APPDATA", ""))
 DEFAULT_REASONING_EFFORT = "{fallback_reasoning_effort}"
 SHOW_REASONING = {str(show_reasoning)}
 PRIVACY_MODE = {str(privacy_mode)}
@@ -744,9 +744,41 @@ def _format_reasoning_label(reasoning_effort):
     }}.get(effort, f"R: {{effort}}")
 
 
-print("[MONITOR] Starting Hermes Presence v3.2.0 (all-pipe)", flush=True)
+def _find_latest_state_file(state_dir):
+    """Scan for all presence_*.json files and return the newest by timestamp."""
+    if not state_dir.exists():
+        return None, None
+    candidates = []
+    for f in state_dir.glob("presence_*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            ts_str = data.get("timestamp", "")
+            if not ts_str:
+                continue
+            ts = datetime.fromisoformat(ts_str)
+            candidates.append((f, data, ts.timestamp()))
+        except (json.JSONDecodeError, ValueError, OSError):
+            continue
+    # Legacy fallback
+    legacy = state_dir / "{mirror_name}"
+    if legacy.exists():
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+            ts_str = data.get("timestamp", "")
+            if ts_str:
+                ts = datetime.fromisoformat(ts_str)
+                candidates.append((legacy, data, ts.timestamp()))
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass
+    if not candidates:
+        return None, None
+    candidates.sort(key=lambda x: x[2], reverse=True)
+    return candidates[0][0], candidates[0][1]
+
+
+print("[MONITOR] Starting Hermes Presence v3.2.0 (all-pipe, multi-session)", flush=True)
 print(f"[MONITOR] Client ID: {{CLIENT_ID}}", flush=True)
-print(f"[MONITOR] State file: {{STATE_FILE}}", flush=True)
+print(f"[MONITOR] State dir: {{STATE_DIR}}", flush=True)
 
 # connections dict: pipe_num -> Presence
 connections = {{}}
@@ -843,14 +875,14 @@ while True:
         no_conn_count = 0  # Reset watchdog on successful connection
 
     try:
-        if not STATE_FILE.exists():
+        state_file, data = _find_latest_state_file(STATE_DIR)
+        if data is None:
             if last_hash:
                 disconnect_all()
                 last_hash = ""
             time.sleep(2)
             continue
 
-        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         act = data.get("activity", {{}})
         sess = data.get("session", {{}})
 

@@ -36,7 +36,20 @@ from hermes_presence.writer import get_writer  # noqa: E402
 
 # Profile detection
 _PROFILE = os.environ.get("HERMES_PROFILE", "main")
-_STATE_FILE = get_state_file_path(_PROFILE)
+
+# Session ID detection (TUI/gateway sessions get unique state files)
+_SESSION_ID = ""
+try:
+    _tui_session_file = os.environ.get("HERMES_TUI_ACTIVE_SESSION_FILE", "").strip()
+    if _tui_session_file:
+        with open(_tui_session_file) as _f:
+            _SESSION_ID = json.load(_f).get("session_id", "")
+except Exception:
+    pass
+if not _SESSION_ID:
+    _SESSION_ID = os.environ.get("HERMES_SESSION_ID", "").strip()
+
+_STATE_FILE = get_state_file_path(_PROFILE, _SESSION_ID)
 
 # Cron / orchestrator detection
 _IS_CRON = any(

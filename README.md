@@ -1,7 +1,7 @@
 # Hermes Presence
 
 [![CI](https://github.com/Logi4k/hermes-presence/actions/workflows/ci.yml/badge.svg)](https://github.com/Logi4k/hermes-presence/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-3.2.0-blue)](https://github.com/Logi4k/hermes-presence)
+[![Version](https://img.shields.io/badge/version-3.3.0-blue)](https://github.com/Logi4k/hermes-presence)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 
 Cross-platform Discord Rich Presence for Hermes Agent. Shows what Hermes is doing in real time on Discord: active tool, current model, provider, reasoning level, privacy-safe mode, session cost, and sub-agent count.

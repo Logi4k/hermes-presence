@@ -39,8 +39,23 @@ _IS_ORCHESTRATOR = os.environ.get("HERMES_ORCHESTRATOR", "").strip() == "1"
 # Check for profile
 _PROFILE = os.environ.get("HERMES_PROFILE", "main")
 
-# Profile-specific state file path
-_STATE_FILE = get_state_file_path(_PROFILE)
+# Session ID detection (TUI/gateway sessions get unique files)
+_SESSION_ID = ""
+try:
+    _tui_session_file = os.environ.get("HERMES_TUI_ACTIVE_SESSION_FILE", "").strip()
+    if _tui_session_file:
+        import json as _json
+        with open(_tui_session_file) as _f:
+            _SESSION_ID = _json.load(_f).get("session_id", "")
+except Exception:
+    pass
+
+# Fallback: session_id from env
+if not _SESSION_ID:
+    _SESSION_ID = os.environ.get("HERMES_SESSION_ID", "").strip()
+
+# Per-session state file path (eliminates multi-session contention)
+_STATE_FILE = get_state_file_path(_PROFILE, _SESSION_ID)
 
 
 def _reasoning_effort_from_agent(agent=None) -> str:

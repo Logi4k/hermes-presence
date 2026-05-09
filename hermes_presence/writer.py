@@ -41,9 +41,10 @@ class PresenceWriter:
         writer.idle()
     """
 
-    def __init__(self, state_file: Optional[Path] = None):
+    def __init__(self, state_file: Optional[Path] = None, session_id: str = ""):
         self._state_file = state_file or DEFAULT_STATE_FILE
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
+        self._session_id = session_id
         self._session_start = datetime.now(timezone.utc)
         self._tool_calls_count = 0
         self._files_modified = 0
@@ -102,11 +103,10 @@ class PresenceWriter:
     def _mirror_to_windows(self):
         """Mirror state file to Windows AppData if running under WSL.
 
-        Uses profile-specific filenames so multiple Hermes profiles
-        can coexist without overwriting each other:
-          main     → hermes_presence.json
-          research → research_presence.json
-          other    → {profile}_presence.json
+        Per-session files eliminate contention between concurrent sessions:
+          session → presence_{session_id}.json
+          main    → hermes_presence.json (legacy, no session_id)
+          profile → {profile}_presence.json (legacy, no session_id)
         """
         if not _is_wsl():
             return
@@ -120,8 +120,10 @@ class PresenceWriter:
 
             windows_appdata = Path("/mnt/c/Users") / windows_username / "AppData" / "Roaming"
 
-            # Profile-aware filename
-            if self._profile == "main":
+            # Session-aware filename (primary)
+            if self._session_id:
+                filename = f"presence_{self._session_id}.json"
+            elif self._profile == "main":
                 filename = "hermes_presence.json"
             else:
                 filename = f"{self._profile}_presence.json"

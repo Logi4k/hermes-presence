@@ -18,7 +18,6 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
-
 HERMES_TUI_FLAGS = {"--tui", "tui"}
 _WINDOWS_TERMINAL_NAMES = {"windowsterminal.exe", "openconsole.exe"}
 _WSL_PROCESS_NAMES = {"wsl.exe", "wslhost.exe"}
@@ -197,7 +196,10 @@ def scan_windows_terminal_processes(timeout: int = 4) -> list[dict[str, Any]]:
 
     command = r"""
 Get-CimInstance Win32_Process |
-  Where-Object { $_.Name -match 'WindowsTerminal|OpenConsole|wsl' -or ($_.CommandLine -and $_.CommandLine -match 'tmux|hermes|--tui') } |
+  Where-Object {
+    $_.Name -match 'WindowsTerminal|OpenConsole|wsl' -or
+    ($_.CommandLine -and $_.CommandLine -match 'tmux|hermes|--tui')
+  } |
   Select-Object ProcessId,ParentProcessId,Name,CommandLine |
   ConvertTo-Json -Depth 3
 """

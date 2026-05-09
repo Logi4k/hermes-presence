@@ -54,6 +54,73 @@ ACTIVITY_MAP = {
 }
 
 
+def _find_latest_state_file(state_dir: Path) -> tuple[Path, dict] | tuple[None, None]:
+    """Scan for all presence_*.json files and return the newest by timestamp.
+
+    Returns (path, parsed_data) or (None, None) if no valid files found.
+    """
+    if not state_dir.exists():
+        return None, None
+
+    candidates: list[tuple[Path, dict, float]] = []
+
+    for f in state_dir.glob("presence_*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            ts_str = data.get("timestamp", "")
+            if not ts_str:
+                continue
+            ts = datetime.fromisoformat(ts_str)
+            ts_epoch = ts.timestamp()
+            candidates.append((f, data, ts_epoch))
+        except (json.JSONDecodeError, ValueError, OSError):
+            continue
+
+    # Also check legacy presence.json for backward compat
+    legacy = state_dir / "presence.json"
+    if legacy.exists():
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+            ts_str = data.get("timestamp", "")
+            if ts_str:
+                ts = datetime.fromisoformat(ts_str)
+                ts_epoch = ts.timestamp()
+                candidates.append((legacy, data, ts_epoch))
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass
+
+    if not candidates:
+        return None, None
+
+    # Sort by timestamp descending, pick newest
+    candidates.sort(key=lambda x: x[2], reverse=True)
+    return candidates[0][0], candidates[0][1]
+
+
+def _cleanup_stale_state_files(state_dir: Path, max_age_seconds: int = 3600) -> int:
+    """Remove state files older than max_age_seconds. Returns count removed."""
+    if not state_dir.exists():
+        return 0
+
+    cutoff = datetime.now(timezone.utc).timestamp() - max_age_seconds
+    removed = 0
+
+    for f in state_dir.glob("presence_*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            ts_str = data.get("timestamp", "")
+            if not ts_str:
+                continue
+            ts = datetime.fromisoformat(ts_str)
+            if ts.timestamp() < cutoff:
+                f.unlink()
+                removed += 1
+        except (json.JSONDecodeError, ValueError, OSError):
+            continue
+
+    return removed
+
+
 def _detect_platform() -> str:
     """Detect OS: 'linux', 'macos', 'windows', 'wsl2'."""
     if sys.platform == "win32":
@@ -329,7 +396,7 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print("[start] Hermes Presence Monitor v3.2.0", flush=True)
+        print("[start] Hermes Presence Monitor v3.3.0", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
@@ -399,15 +466,14 @@ class UnifiedMonitor:
             time.sleep(self.poll_interval)
 
     def _poll_once(self):
-        """Read state file, push to Discord if changed."""
-        if not self.state_file.exists():
+        """Read state file(s), pick newest by timestamp, push to Discord if changed."""
+        state_file, state = _find_latest_state_file(self.state_file.parent)
+
+        if state is None:
             if self.last_hash:
                 self.disconnect_all()
                 self.last_hash = ""
             return
-
-        raw = self.state_file.read_text(encoding="utf-8")
-        state = json.loads(raw)
 
         act = state.get("activity", {})
         sess = state.get("session", {})

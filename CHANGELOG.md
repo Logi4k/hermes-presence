@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.3.0] - 2026-05-09
+
+### Added
+- **Per-session state files** eliminate multi-session contention:
+  - Each TUI/gateway session writes to `presence_{session_id}.json`
+  - Windows monitor scans all `presence_*.json` files and picks the newest by timestamp
+  - Legacy `presence.json` still supported as backward-compatibility fallback
+- **Stale file cleanup**: `_cleanup_stale_state_files()` removes state files older than 1 hour
+- **Session ID detection**: reads `HERMES_TUI_ACTIVE_SESSION_FILE` env var for unique session IDs,
+  falls back to `HERMES_SESSION_ID`
+- **WSL mirror**: per-session files mirrored to Windows as `presence_{session_id}.json`
+
+### Fixed
+- TUI sessions no longer overwrite each other's Discord state (last-active-wins)
+- Telegram/gateway sessions no longer clobber TUI status in Discord
+- Lint: `tui_sessions.py` E501 line too long and import ordering issues resolved
+- Monitor `_find_latest_state_file()` separated from cleanup logic to avoid breaking tests
+
+### Changed
+- `get_state_file_path()` now accepts optional `session_id` parameter
+- `get_mirror_path()` now accepts optional `session_id` parameter
+- Windows monitor template updated to scan multiple session files
+- Hook bridge and `hook.py` both detect session ID automatically
+
+---
+
 ## [3.2.0] - 2026-05-04
 
 ### Added
