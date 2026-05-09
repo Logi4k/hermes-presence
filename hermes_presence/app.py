@@ -525,12 +525,38 @@ def _cmd_doctor(args):
 
 def _cmd_cleanup_profiles(args):
     """Remove stale Windows profile launchers and monitors."""
-    from .platforms.windows import cleanup_profile_artifacts
-    removed = []
+    from .platforms import windows
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    removed: list[str] = []
+
     for profile in args.profiles:
-        removed.extend(cleanup_profile_artifacts(profile))
+        if dry_run:
+            launcher = windows.WindowsLauncher("", Path("presence.json"), profile=profile)
+            candidate_paths = [
+                launcher._startup_script_path(),
+                launcher._legacy_bat_path(),
+                launcher._legacy_bat_path().with_suffix(launcher._legacy_bat_path().suffix + ".disabled"),
+                launcher._monitor_target,
+            ]
+            for path in candidate_paths:
+                if path.exists():
+                    removed.append(str(path))
+
+            task_names = [launcher._task_name, *launcher._legacy_task_names()]
+            for task_name in task_names:
+                try:
+                    result = windows._run_win(["schtasks", "/Query", "/TN", task_name], timeout=10)
+                    if result.returncode == 0:
+                        removed.append(f"Task: {task_name}")
+                except Exception:
+                    pass
+        else:
+            removed.extend(windows.cleanup_profile_artifacts(profile))
+
     if removed:
-        print("Removed stale profile artifacts:")
+        action = "Would remove" if dry_run else "Removed"
+        print(f"{action} {len(removed)} stale profile artifact(s)")
         for item in removed:
             print(f"  {item}")
     else:
@@ -778,6 +804,11 @@ def main():
 
     p_cleanup = subparsers.add_parser("cleanup-profiles", help="Remove stale Windows profile artifacts")
     p_cleanup.add_argument("profiles", nargs="+", help="Profile names to clean up")
+    p_cleanup.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List stale artifacts without deleting",
+    )
 
     p_state_cleanup = subparsers.add_parser("cleanup-state", help="Force cleanup of stale state files")
     p_state_cleanup.add_argument(

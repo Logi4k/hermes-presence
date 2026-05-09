@@ -132,6 +132,37 @@ def test_cleanup_profiles_removes_stale_windows_profile_artifacts(monkeypatch, t
     assert not (appdata / "clinical_presence_monitor.py").exists()
 
 
+def test_cleanup_profiles_command_dry_run_keeps_files(monkeypatch, tmp_path, capsys):
+    startup = tmp_path / "Startup"
+    appdata = tmp_path / "Roaming"
+    startup.mkdir()
+    appdata.mkdir()
+    (startup / "clinical_presence.vbs").write_text("", encoding="utf-8")
+    (startup / "clinical_presence.bat").write_text("", encoding="utf-8")
+    (appdata / "clinical_presence_monitor.py").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(windows, "STARTUP_DIR", startup)
+    monkeypatch.setattr(windows, "_APPDATA", str(appdata))
+    monkeypatch.setattr(
+        windows,
+        "_run_win",
+        lambda *args, **kwargs: type("R", (), {"returncode": 1, "stdout": "", "stderr": "ERROR: The system cannot find the file specified."})(),
+    )
+
+    args = type(
+        "Args",
+        (),
+        {"profiles": ["clinical"], "dry_run": True},
+    )()
+    app._cmd_cleanup_profiles(args)
+
+    output = capsys.readouterr().out
+    assert "Would remove" in output
+    assert (startup / "clinical_presence.vbs").exists()
+    assert (startup / "clinical_presence.bat").exists()
+    assert (appdata / "clinical_presence_monitor.py").exists()
+
+
 def _write_state_file(path: Path, state: str, *, now: datetime) -> None:
     path.write_text(
         json.dumps(
