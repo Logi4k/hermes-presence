@@ -526,7 +526,6 @@ def _cmd_doctor(args):
 def _cmd_cleanup_profiles(args):
     """Remove stale Windows profile launchers and monitors."""
     from .platforms.windows import cleanup_profile_artifacts
-
     removed = []
     for profile in args.profiles:
         removed.extend(cleanup_profile_artifacts(profile))
@@ -536,6 +535,27 @@ def _cmd_cleanup_profiles(args):
             print(f"  {item}")
     else:
         print("No stale profile artifacts found.")
+
+
+def _cmd_cleanup_state(args):
+    """Force cleanup of stale per-session state files."""
+    from .config import get_state_file_path
+    from .monitor import _cleanup_stale_state_files
+
+    max_age = getattr(args, "max_age_seconds", 3600)
+    if max_age <= 0:
+        print("ERROR: --max-age-seconds must be a positive integer")
+        raise SystemExit(1)
+
+    state_file = get_state_file_path(profile=getattr(args, "profile", "main"))
+    state_dir = Path(getattr(args, "state_dir") or state_file.parent)
+
+    removed = _cleanup_stale_state_files(state_dir=state_dir, max_age_seconds=max_age)
+    if removed:
+        print(f"Removed {removed} stale state file(s) older than {max_age}s")
+    else:
+        print("No stale state files found.")
+
 
 
 def _get_launcher(platform: str, client_id: str, state_file, profile: str = "main"):
@@ -731,6 +751,24 @@ def main():
     p_cleanup = subparsers.add_parser("cleanup-profiles", help="Remove stale Windows profile artifacts")
     p_cleanup.add_argument("profiles", nargs="+", help="Profile names to clean up")
 
+    p_state_cleanup = subparsers.add_parser("cleanup-state", help="Force cleanup of stale state files")
+    p_state_cleanup.add_argument(
+        "--profile",
+        default="main",
+        help="Profile used to resolve state file path (default: main)",
+    )
+    p_state_cleanup.add_argument(
+        "--state-dir",
+        default=None,
+        help="Override state directory to scan (defaults to profile state file parent)",
+    )
+    p_state_cleanup.add_argument(
+        "--max-age-seconds",
+        type=int,
+        default=3600,
+        help="Delete files older than this many seconds (default: 3600)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -752,6 +790,7 @@ def main():
         "restart": _cmd_restart,
         "doctor": _cmd_doctor,
         "cleanup-profiles": _cmd_cleanup_profiles,
+        "cleanup-state": _cmd_cleanup_state,
     }
 
     cmd = commands.get(args.command)

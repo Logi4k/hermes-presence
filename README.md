@@ -25,7 +25,7 @@ Discord Profile
 - **Self-update**: `hermes-presence update --restart` pulls latest from GitHub and restarts the monitor
 - **Privacy controls**: hide reasoning labels or run in privacy mode to avoid leaking filenames/tools
 - **Startup doctor**: `doctor --fix` detects visible `.bat` launchers, stale scheduled tasks, and legacy pollers
-- **Rich CLI**: `status --json`, `status --verbose`, `restart`, `validate`, `doctor`, `cleanup-profiles`, `config set`, `run --profile`
+- **Rich CLI**: `status --json`, `status --verbose`, `restart`, `validate`, `doctor`, `cleanup-profiles`, `cleanup-state`, `config set`, `run --profile`
 - **Hermes hook integration**: `post_llm_call` hook intercepts model info for "unknown model" fix
 
 ## Quick Start
@@ -93,6 +93,7 @@ The hook fires after every LLM call: extracts model, provider, reasoning effort,
 | `hermes-presence validate` | Run diagnostic checks (pip, Discord, WSL bridge) |
 | `hermes-presence doctor --fix` | Diagnose and safely clean visible Windows startup launchers and old tasks |
 | `hermes-presence cleanup-profiles clinical` | Remove stale Windows launchers/monitors for a named profile |
+| `hermes-presence cleanup-state` | Remove stale per-session state files from the resolved state directory |
 | `hermes-presence config` | Show current configuration |
 | `hermes-presence config set <key> <value>` | Update config (e.g., `display.idle_timeout 20`) |
 | `hermes-presence run` | Run monitor in foreground for debugging |

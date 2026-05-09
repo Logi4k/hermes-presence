@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+
+import pytest
 
 from hermes_presence import app, config as config_mod
 from hermes_presence.monitor import UnifiedMonitor
@@ -127,6 +130,69 @@ def test_cleanup_profiles_removes_stale_windows_profile_artifacts(monkeypatch, t
     assert not (startup / "clinical_presence.vbs").exists()
     assert not (startup / "clinical_presence.bat").exists()
     assert not (appdata / "clinical_presence_monitor.py").exists()
+
+
+def _write_state_file(path: Path, state: str, *, now: datetime) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "timestamp": now.isoformat(),
+                "activity": {"state": state},
+                "session": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_cleanup_state_command_removes_stale_files(monkeypatch, tmp_path, capsys):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    now = datetime.now(timezone.utc)
+
+    stale = state_dir / "presence_stale.json"
+    fresh = state_dir / "presence_fresh.json"
+    _write_state_file(stale, "idle", now=now - timedelta(hours=2))
+    _write_state_file(fresh, "working", now=now)
+
+    monkeypatch.setattr(
+        config_mod,
+        "get_state_file_path",
+        lambda profile="main": state_dir / "presence.json",
+    )
+
+    args = type(
+        "Args",
+        (),
+        {"profile": "main", "state_dir": str(state_dir), "max_age_seconds": 3600},
+    )()
+    app._cmd_cleanup_state(args)
+
+    output = capsys.readouterr().out
+    assert "Removed 1 stale state file(s)" in output
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_cleanup_state_command_rejects_non_positive_max_age(monkeypatch, tmp_path):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    monkeypatch.setattr(
+        config_mod,
+        "get_state_file_path",
+        lambda profile="main": state_dir / "presence.json",
+    )
+
+    args = type(
+        "Args",
+        (),
+        {"profile": "main", "state_dir": str(state_dir), "max_age_seconds": 0},
+    )()
+
+    with pytest.raises(SystemExit):
+        app._cmd_cleanup_state(args)
 
 
 def test_update_command_can_restart_monitor(monkeypatch):
