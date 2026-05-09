@@ -445,7 +445,7 @@ def _cmd_help(args):
 
 def _cmd_version(args):
     """Show version information."""
-    print("hermes-presence v3.3.0")
+    print("hermes-presence v3.4.0")
 
 
 def _cmd_update(args):
@@ -704,7 +704,7 @@ def main():
     p_run.add_argument("--log-file", default=None, help="Path to write JSON-lines log output")
 
     # version
-    parser.add_argument("--version", action="version", version="hermes-presence v3.3.0")
+    parser.add_argument("--version", action="version", version="hermes-presence v3.4.0")
 
     # help subcommand
     subparsers.add_parser("help", help="Show detailed help")

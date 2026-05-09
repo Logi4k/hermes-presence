@@ -175,7 +175,7 @@ def install(
 
     Returns True if successful, False on critical failure.
     """
-    print("Hermes Presence Installer v3.3.0" + (f" (profile: {profile})" if profile != "main" else ""))
+    print("Hermes Presence Installer v3.4.0" + (f" (profile: {profile})" if profile != "main" else ""))
     print("=" * 40)
 
     platform = _detect_platform()

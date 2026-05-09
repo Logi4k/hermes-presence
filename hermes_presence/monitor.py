@@ -121,6 +121,43 @@ def _cleanup_stale_state_files(state_dir: Path, max_age_seconds: int = 3600) -> 
     return removed
 
 
+def _resolve_provider_logo(provider: str) -> str:
+    """Return Discord asset key for a provider."""
+    PROVIDER_LOGO = {
+        "anthropic": "anthropic_logo",
+        "openai": "openai_logo",
+        "xai": "xai_logo",
+        "google": "google_logo",
+        "deepseek": "deepseek_logo",
+        "meta": "meta_logo",
+        "mistral": "mistral_logo",
+        "openrouter": "openrouter_logo",
+    }
+    return PROVIDER_LOGO.get((provider or "").lower().strip(), "hermes_logo")
+
+
+def _load_cost(cost_file: Optional[Path]) -> tuple[float, str]:
+    """Load daily cost accumulator from disk. Returns (cost, day_stamp)."""
+    if not cost_file or not cost_file.exists():
+        return 0.0, datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        data = json.loads(cost_file.read_text(encoding="utf-8"))
+        return data.get("cost", 0.0), data.get("day", "")
+    except (json.JSONDecodeError, OSError):
+        return 0.0, datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _save_cost(cost_file: Optional[Path], cost: float, day: str):
+    """Save daily cost accumulator to disk."""
+    if not cost_file:
+        return
+    try:
+        cost_file.parent.mkdir(parents=True, exist_ok=True)
+        cost_file.write_text(json.dumps({"cost": cost, "day": day}), encoding="utf-8")
+    except (OSError, IOError):
+        pass
+
+
 def _detect_platform() -> str:
     """Detect OS: 'linux', 'macos', 'windows', 'wsl2'."""
     if sys.platform == "win32":
@@ -266,6 +303,12 @@ class UnifiedMonitor:
         show_nexus_button: bool = False,
         custom_buttons: Optional[list[dict]] = None,
         logger=None,
+        # v3.4.0 features
+        show_profile: bool = True,
+        show_cost: bool = True,
+        provider_logo_mode: bool = True,
+        zombie_timeout_multiplier: int = 2,
+        cost_tracker_file: Optional[Path] = None,
     ):
         if not PYPRESENCE_AVAILABLE:
             raise RuntimeError("pypresence is required. Install: pip install pypresence")
@@ -286,6 +329,17 @@ class UnifiedMonitor:
         self.show_nexus_button = show_nexus_button
         self.custom_buttons = custom_buttons or []
 
+        # v3.4.0 features
+        self.show_profile = show_profile
+        self.show_cost = show_cost
+        self.provider_logo_mode = provider_logo_mode
+        self.zombie_timeout_multiplier = zombie_timeout_multiplier
+        self.cost_tracker_file = cost_tracker_file
+        self._last_seen_timestamp: Optional[float] = None
+        self._zombie_cleared = False
+        self._daily_cost: float = 0.0
+        self._cost_day = ""
+
         self.logger = logger
 
         self.platform = _detect_platform()
@@ -294,6 +348,12 @@ class UnifiedMonitor:
         self.session_start: Optional[datetime] = None
         self._last_push_monotonic = 0.0
         self._republish_interval = max(30, int(self.poll_interval) * 6)
+
+        # v3.4.0: load accumulated daily cost
+        cost_file = self.cost_tracker_file
+        if cost_file is None:
+            cost_file = Path.home() / ".hermes" / "state" / "daily_cost.json"
+        self._daily_cost, self._cost_day = _load_cost(cost_file)
 
         # State tracking
         self._disconnected_notified = False
@@ -396,7 +456,7 @@ class UnifiedMonitor:
 
     def run(self):
         """Main monitor loop. Blocks until interrupted."""
-        print("[start] Hermes Presence Monitor v3.3.0", flush=True)
+        print("[start] Hermes Presence Monitor v3.4.0", flush=True)
         print(f"[start] Platform: {self.platform}", flush=True)
         print(f"[start] State file: {self.state_file}", flush=True)
         print(f"[start] Poll interval: {self.poll_interval}s", flush=True)
@@ -469,6 +529,24 @@ class UnifiedMonitor:
         """Read state file(s), pick newest by timestamp, push to Discord if changed."""
         state_file, state = _find_latest_state_file(self.state_file.parent)
 
+        # v3.4.0 F6: zero TUI sessions + no valid state -> clear
+        tui_count = 0
+        try:
+            from .tui_sessions import detect_tui_sessions
+            tui = detect_tui_sessions()
+            tui_count = tui.get("count", 0)
+        except Exception:
+            pass
+
+        # Only clear immediately if zero TUI, no state, and we had something showing
+        if tui_count == 0 and self.last_hash and state is None:
+            self.disconnect_all()
+            self.last_hash = ""
+            self._zombie_cleared = False
+            self._last_seen_timestamp = None
+            print("[clear] No TUI sessions or state detected, cleared Discord", flush=True)
+            return
+
         if state is None:
             if self.last_hash:
                 self.disconnect_all()
@@ -483,18 +561,41 @@ class UnifiedMonitor:
         subagent_count = sess.get("subagent_count", 0)
         tool_started_at = act.get("tool_started_at")
         is_error = act.get("is_error", False)
+        ts_str = state.get("timestamp", "")
 
-        # ---- Tool exclude filter (Tier 3.16) ----
+        # v3.4.0 F1: heartbeat / zombie detection
+        self._zombie_cleared = False
+        if ts_str:
+            try:
+                ts_epoch = datetime.fromisoformat(ts_str).timestamp()
+                # Only track fresh states (ignore old test fixtures)
+                age_secs = datetime.now(timezone.utc).timestamp() - ts_epoch
+                if age_secs < 86400:  # only track states created within 24h
+                    self._last_seen_timestamp = ts_epoch
+            except ValueError:
+                pass
+
+        if self._last_seen_timestamp and self.last_hash:
+            stale_secs = datetime.now(timezone.utc).timestamp() - self._last_seen_timestamp
+            zombie_threshold = self.idle_timeout * self.zombie_timeout_multiplier
+            if stale_secs >= zombie_threshold and not self._zombie_cleared:
+                self.disconnect_all()
+                self.last_hash = ""
+                self._zombie_cleared = True
+                mins = int(stale_secs // 60)
+                print(f"[clear] State stale ({mins}m old), cleared Discord", flush=True)
+                return
+
+        # ---- Tool exclude filter ----
         if self.privacy_mode:
             tool = ""
             detail = "Working privately"
 
         if tool in self.exclude_tools:
-            # Still show working state but without tool detail
             tool = ""
             detail = "Working..."
 
-        # ---- Override state for errors (Tier 3.13) ----
+        # ---- Override state for errors ----
         if is_error:
             state_name = "error"
             if not detail:
@@ -507,7 +608,7 @@ class UnifiedMonitor:
         if len(details) > 128:
             details = details[:125] + "..."
 
-        # ---- Model + provider display (Tier 2.5, 3.11) ----
+        # ---- Model + provider display ----
         model_label = ""
         if self.show_model:
             model_label = _format_model_label(
@@ -525,6 +626,16 @@ class UnifiedMonitor:
         if reasoning_label:
             state_text = f"{state_text} -- {reasoning_label}"
 
+        # v3.4.0 F2: profile name in state
+        profile = state.get("profile", "") or ""
+        if not profile and state_file:
+            # Try extracting from filename: {profile}_presence.json
+            fname = state_file.name if isinstance(state_file, Path) else ""
+            if "_presence" in fname and fname != "presence.json":
+                profile = fname.split("_presence")[0] or ""
+        if self.show_profile and profile and profile not in ("presence", "main"):
+            state_text = f"{state_text} | {profile}"
+
         hover_parts = []
         if model_label:
             hover_parts.append(f"Model: {model_label}")
@@ -534,9 +645,15 @@ class UnifiedMonitor:
         hover_parts.append(f"Tool calls: {calls}")
         large_text = " | ".join(hover_parts) if hover_parts else self.large_text
 
-        # ---- Tool-specific icon (Tier 1, already v2) ----
+        # ---- Tool-specific icon ----
         small_img = _resolve_small_icon(tool, state_name)
         small_text = "private" if self.privacy_mode else (tool or state_name)
+
+        # ---- v3.4.0 F4: provider logo ----
+        provider = str(sess.get("provider", "") or "").lower().strip()
+        large_image = self.large_image
+        if self.provider_logo_mode and provider:
+            large_image = _resolve_provider_logo(provider)
 
         # ---- Per-tool timer ----
         if tool_started_at:
@@ -569,9 +686,32 @@ class UnifiedMonitor:
                 if len(buttons) < 2:
                     buttons.append(cb)
 
+        # ---- v3.4.0 F3: cost tracking ----
+        cost_display = ""
+        cost = sess.get("cost_usd")
+        if cost and isinstance(cost, (int, float)):
+            # Rollover daily cost tracking
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if self._cost_day != today:
+                self._daily_cost = 0.0
+                self._cost_day = today
+            self._daily_cost += float(cost)
+            if self.cost_tracker_file is None:
+                ct = Path.home() / ".hermes" / "state" / "daily_cost.json"
+            else:
+                ct = self.cost_tracker_file
+            _save_cost(ct, self._daily_cost, today)
+
+            if self.show_cost:
+                cost_display = f"Session: ${float(cost):.2f}"
+                if self._daily_cost > float(cost):
+                    cost_display = f"{cost_display} | Today: ${self._daily_cost:.2f}"
+
+        # Optional: prepend cost to details line
+        if cost_display:
+            details = f"{cost_display} -- {details}"
+
         # ---- Hash for change detection ----
-        # Use tool name + state, NOT the precise ISO timestamp
-        # (timestamp changes every second, causing unnecessary Discord pushes)
         hash_parts = [
             state_text,
             details,
@@ -580,13 +720,15 @@ class UnifiedMonitor:
             str(sess.get("started_at", "")),
             str(sess.get("tool_calls_count", 0)),
             str(subagent_count),
+            str(sess.get("files_modified", 0)),
+            str(act.get("is_error", False)),
+            str(sess.get("reasoning_effort", "")),
+            str(self.show_reasoning),
+            str(self.privacy_mode),
+            profile,
+            large_image,
+            cost_display,
         ]
-        # Tier 4 additions
-        hash_parts.append(str(sess.get("files_modified", 0)))
-        hash_parts.append(str(act.get("is_error", False)))
-        hash_parts.append(str(sess.get("reasoning_effort", "")))
-        hash_parts.append(str(self.show_reasoning))
-        hash_parts.append(str(self.privacy_mode))
 
         new_hash = "|".join(hash_parts)
 
@@ -594,7 +736,7 @@ class UnifiedMonitor:
         should_republish = (now_mono - self._last_push_monotonic) >= self._republish_interval
 
         if new_hash != self.last_hash or should_republish:
-            # ---- Sub-agent party size (Tier 1) ----
+            # ---- Sub-agent party size ----
             party = None
             if subagent_count > 0:
                 party = subagent_count + 1
@@ -619,21 +761,21 @@ class UnifiedMonitor:
                 extras.append(f"{subagent_count} subs")
             if tool:
                 extras.append(f"icon={small_img}")
-            # Tier 4: cost
-            cost = sess.get("cost_usd")
             if cost and cost > 0:
                 extras.append(f"${cost:.4f}")
-            # Tier 4: files
             files = sess.get("files_modified", 0)
             if files > 0:
                 extras.append(f"{files} files")
-            # Tier 4: cron/orchestrator (from session, not top-level state)
             is_cron = sess.get("is_cron", False)
             if is_cron:
                 extras.append("cron")
             is_orch = sess.get("is_orchestrator", False)
             if is_orch:
                 extras.append("orch")
+            if profile and profile not in ("presence", "main"):
+                extras.append(f"profile={profile}")
+            if provider:
+                extras.append(f"logo={large_image}")
 
             extra_str = f" ({', '.join(extras)})" if extras else ""
             print(

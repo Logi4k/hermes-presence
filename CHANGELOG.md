@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.4.0] - 2026-05-09
+
+### Added
+- **Zombie detection (F1)**: Auto-clears Discord presence when state file timestamp
+  goes stale beyond `idle_timeout * zombie_timeout_multiplier` (default 2x = 20s).
+  Prevents stale Discord status when Hermes crashes or exits uncleanly.
+- **Profile name display (F2)**: Shows active profile in Discord state line.
+  e.g., "Answering -- GPT-5.5 (OpenAI) | clinical"
+- **Cost tracking (F3)**: Shows session cost and daily accumulator in Discord state.
+  Persists to `~/.hermes/state/daily_cost.json`. Displays "Session: $0.04 | Today: $1.23"
+- **Provider logos (F4)**: Dynamic `large_image` based on model provider.
+  Maps known providers to Discord asset keys (anthropic_logo, openai_logo, etc.)
+- **Zero-session auto-clear (F6)**: Clears Discord if zero TUI sessions detected
+  AND no valid state files exist. Faster than waiting for zombie timeout.
+- **New config fields**: `display.zombie_timeout_multiplier`, `display.show_profile`,
+  `display.show_cost`, `display.provider_logo_mode`, `advanced.cost_tracker_file`
+
+### Fixed
+- WSL mirror writes per-session files to Windows (`presence_{session_id}.json`)
+- update command works offline (reinstalls monitor script instead of pip install)
+- Zombie detection ignores test fixtures older than 24 hours
+
 ## [3.3.0] - 2026-05-09
 
 ### Added

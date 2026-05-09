@@ -41,6 +41,14 @@ class DisplayConfig:
     idle_timeout: int = 10
     large_image: str = "hermes_logo"
     large_text: str = "Hermes Agent"
+    # v3.4.0: zombie detection multiplier (default 2x idle_timeout)
+    zombie_timeout_multiplier: int = 2
+    # v3.4.0: show profile name in Discord state
+    show_profile: bool = True
+    # v3.4.0: show cost in Discord detail
+    show_cost: bool = True
+    # v3.4.0: dynamic provider logos
+    provider_logo_mode: bool = True
 
 
 @dataclass
@@ -71,6 +79,8 @@ class AdvancedConfig:
     poll_interval: int = 5
     pipe_connect_retry: int = 3
     log_file: str = ""  # path to JSON-lines log, empty = disabled
+    # v3.4.0: cost tracking persistence file
+    cost_tracker_file: str = ""  # empty = ~/.hermes/state/daily_cost.json
 
 
 @dataclass
