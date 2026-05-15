@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from hermes_presence import monitor as monitor_mod
@@ -19,10 +20,13 @@ class FakeRpc:
         pass
 
 
-def _write_state(path: Path, *, session_id="s1", started_at="2026-05-03T12:00:00+00:00", state="idle", detail="Waiting for input"):
+def _write_state(path: Path, *, session_id="s1", started_at=None, state="idle", detail="Waiting for input", timestamp=None):
+    now = datetime.now(timezone.utc)
+    started_at = started_at or now.isoformat()
+    timestamp = timestamp or now.isoformat()
     path.write_text(json.dumps({
         "version": 3,
-        "timestamp": "2026-05-03T12:00:01+00:00",
+        "timestamp": timestamp,
         "activity": {
             "state": state,
             "tool": None,
@@ -45,7 +49,7 @@ def _write_state(path: Path, *, session_id="s1", started_at="2026-05-03T12:00:00
 
 def _monitor(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor_mod, "PYPRESENCE_AVAILABLE", True)
-    m = UnifiedMonitor(client_id="123", state_file=tmp_path / "presence.json")
+    m = UnifiedMonitor(client_id="123", state_file=tmp_path / "presence.json", privacy_mode=False, show_model=True, show_reasoning=True)
     m._republish_interval = 3600
     rpc = FakeRpc()
     m.connections = {0: rpc}
@@ -106,3 +110,18 @@ def test_presence_includes_model_and_reasoning_in_state_and_hover(tmp_path, monk
     assert "R: high" in update["state"]
     assert "Model: DeepSeek V4 Pro" in update["large_text"]
     assert "Reasoning: high" in update["large_text"]
+
+
+def test_stale_state_without_tui_does_not_publish(tmp_path, monkeypatch):
+    import hermes_presence.tui_sessions as tui_sessions
+
+    state_file = tmp_path / "presence.json"
+    stale_ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    _write_state(state_file, state="thinking", detail="Composing reply", timestamp=stale_ts)
+    monkeypatch.setattr(tui_sessions, "detect_tui_sessions", lambda: {"count": 0})
+    m, rpc = _monitor(tmp_path, monkeypatch)
+
+    m._poll_once()
+
+    assert rpc.updates == []
+    assert m.connections == {}

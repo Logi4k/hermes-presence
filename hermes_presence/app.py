@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import __version__
+
 
 def _cmd_install(args):
     """Install hermes-presence (one-command setup)."""
@@ -445,7 +447,7 @@ def _cmd_help(args):
 
 def _cmd_version(args):
     """Show version information."""
-    print("hermes-presence v3.4.0")
+    print(f"hermes-presence v{__version__}")
 
 
 def _cmd_update(args):
@@ -778,7 +780,7 @@ def main():
     p_run.add_argument("--log-file", default=None, help="Path to write JSON-lines log output")
 
     # version
-    parser.add_argument("--version", action="version", version="hermes-presence v3.4.0")
+    parser.add_argument("--version", action="version", version=f"hermes-presence v{__version__}")
 
     # help subcommand
     subparsers.add_parser("help", help="Show detailed help")

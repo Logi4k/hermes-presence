@@ -49,13 +49,39 @@ except Exception:
 if not _SESSION_ID:
     _SESSION_ID = os.environ.get("HERMES_SESSION_ID", "").strip()
 
-_STATE_FILE = get_state_file_path(_PROFILE, _SESSION_ID)
-
 # Cron / orchestrator detection
 _IS_CRON = any(
     os.environ.get(v, "").strip() for v in ["HERMES_CRON_JOB_ID", "CRON_JOB_ID", "HERMES_SCHEDULED"]
 )
 _IS_ORCHESTRATOR = os.environ.get("HERMES_ORCHESTRATOR", "").strip() == "1"
+
+
+def _payload_extra(payload: dict) -> dict:
+    """Return shell-hook extras, tolerating malformed payloads."""
+    extra = payload.get("extra", {})
+    return extra if isinstance(extra, dict) else {}
+
+
+def _payload_value(payload: dict, key: str, default=None):
+    """Read a value from top-level payload, then shell-hook `extra`.
+
+    Hermes shell hooks serialize only a small allowlist at top level and place
+    fields such as model/platform/provider in `extra`. The bridge historically
+    read only top-level keys, which meant richer session metadata silently fell
+    back to environment defaults.
+    """
+    value = payload.get(key)
+    if value not in (None, ""):
+        return value
+    value = _payload_extra(payload).get(key)
+    if value not in (None, ""):
+        return value
+    return default
+
+
+def _payload_session_id(payload: dict) -> str:
+    """Resolve session ID from environment first, then hook payload."""
+    return _SESSION_ID or str(_payload_value(payload, "session_id", "") or "").strip()
 
 
 def handle_pre_tool_call(payload: dict, writer):
@@ -71,7 +97,11 @@ def handle_post_tool_call(payload: dict, writer):
     if error:
         writer.error(str(error)[:100])
     else:
-        writer.idle()
+        # Do not immediately fall back to idle. Most Hermes tools finish faster
+        # than Discord's polling interval, so an instant idle update hides the
+        # task entirely. Keep a short "reviewing results" state until the next
+        # LLM/final idle hook takes over.
+        writer.reviewing_tool_results(payload.get("tool_name", ""))
 
     # Track file modifications
     tool_name = payload.get("tool_name", "")
@@ -86,9 +116,9 @@ def handle_post_tool_call(payload: dict, writer):
 
 def handle_pre_llm_call(payload: dict, writer):
     """Before LLM call — model info, thinking state."""
-    is_first_turn = payload.get("is_first_turn", False)
-    model = payload.get("model", os.environ.get("HERMES_MODEL", "unknown"))
-    provider = payload.get("provider", os.environ.get("HERMES_PROVIDER", "unknown"))
+    is_first_turn = bool(_payload_value(payload, "is_first_turn", False))
+    model = _payload_value(payload, "model", os.environ.get("HERMES_MODEL", "unknown"))
+    provider = _payload_value(payload, "provider", os.environ.get("HERMES_PROVIDER", "unknown"))
 
     if is_first_turn:
         writer.set_session(
@@ -120,8 +150,8 @@ def handle_post_llm_call(payload: dict, writer):
 
 def handle_on_session_start(payload: dict, writer):
     """Session started."""
-    model = payload.get("model", os.environ.get("HERMES_MODEL", "unknown"))
-    provider = payload.get("provider", os.environ.get("HERMES_PROVIDER", "unknown"))
+    model = _payload_value(payload, "model", os.environ.get("HERMES_MODEL", "unknown"))
+    provider = _payload_value(payload, "provider", os.environ.get("HERMES_PROVIDER", "unknown"))
     writer.set_session(
         model=model,
         provider=provider,
@@ -179,7 +209,9 @@ def main():
     if not event or event not in HANDLERS:
         return 0
 
-    writer = get_writer(_STATE_FILE)
+    session_id = _payload_session_id(payload)
+    state_file = get_state_file_path(_PROFILE, session_id)
+    writer = get_writer(state_file, session_id=session_id)
 
     # Restore model/provider and session stats from prior state file.
     # Each hook runs as a separate process with a fresh writer that

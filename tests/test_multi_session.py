@@ -54,9 +54,17 @@ def test_cleanup_stale_state_files_removes_old():
             "session": {},
         }))
 
+        legacy_stale = d / "presence.json"
+        legacy_stale.write_text(json.dumps({
+            "timestamp": (now - timedelta(hours=2)).isoformat(),
+            "activity": {"state": "thinking"},
+            "session": {},
+        }))
+
         removed = _cleanup_stale_state_files(d, max_age_seconds=3600)
-        assert removed == 1
+        assert removed == 2
         assert not stale.exists()
+        assert not legacy_stale.exists()
         assert fresh.exists()
 
 

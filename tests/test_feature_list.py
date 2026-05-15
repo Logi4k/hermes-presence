@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -18,15 +19,27 @@ class Args:
     log_file = None
 
 
+def test_presence_config_defaults_are_privacy_safe():
+    cfg = config_mod.PresenceConfig()
+
+    assert cfg.display.show_model is False
+    assert cfg.display.show_provider is False
+    assert cfg.display.show_reasoning is False
+    assert cfg.display.privacy_mode is True
+    assert cfg.display.show_profile is False
+    assert cfg.display.show_cost is False
+    assert cfg.display.provider_logo_mode is False
+
+
 def test_status_json_includes_reasoning_effort(tmp_path, monkeypatch, capsys):
     state_file = tmp_path / "presence.json"
     state_file.write_text(json.dumps({
         "version": 3,
-        "timestamp": "2026-05-04T12:00:00+00:00",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "activity": {"state": "working", "tool": "terminal", "detail": "Running tests"},
         "session": {
             "id": "s1",
-            "started_at": "2026-05-04T11:59:00+00:00",
+            "started_at": datetime.now(timezone.utc).isoformat(),
             "model": "gpt-5.5",
             "provider": "openai-codex",
             "reasoning_effort": "high",
@@ -50,11 +63,11 @@ def test_monitor_can_hide_reasoning_and_apply_privacy_mode(tmp_path, monkeypatch
     state_file = tmp_path / "presence.json"
     state_file.write_text(json.dumps({
         "version": 3,
-        "timestamp": "2026-05-04T12:00:00+00:00",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "activity": {"state": "working", "tool": "read_file", "detail": "Reading /secret/client-file.md"},
         "session": {
             "id": "s1",
-            "started_at": "2026-05-04T11:59:00+00:00",
+            "started_at": datetime.now(timezone.utc).isoformat(),
             "model": "gpt-5.5",
             "provider": "openai-codex",
             "reasoning_effort": "high",

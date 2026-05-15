@@ -102,6 +102,7 @@ def _install_platform(
     state_file: Path,
     no_start: bool = False,
     profile: str = "main",
+    force: bool = False,
 ) -> bool:
     """Set up platform-specific auto-start."""
     try:
@@ -132,13 +133,13 @@ def _install_platform(
             print(f"[SKIP] No auto-start mechanism for platform: {platform}")
             return True
 
-        if launcher.is_installed():
+        if launcher.is_installed() and not force:
             print(f"[OK] Auto-start already configured for {platform}")
             if not no_start:
                 launcher.start()
             return True
 
-        print(f"[INSTALL] Setting up auto-start for {platform}...")
+        print(f"[INSTALL] {'Refreshing' if force else 'Setting up'} auto-start for {platform}...")
         success = launcher.install()
 
         if success:
@@ -210,7 +211,7 @@ def install(
         platform_ok = True
     else:
         platform_ok = _install_platform(
-            platform, client_id, state_file, no_start=no_start, profile=profile
+            platform, client_id, state_file, no_start=no_start, profile=profile, force=force
         )
 
     # Step 4: Verify state file directory exists

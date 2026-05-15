@@ -64,6 +64,21 @@ def test_process_tool_has_specific_label():
         assert data["activity"]["detail"] != "Using process"
 
 
+def test_reviewing_tool_results_keeps_activity_visible_after_fast_tools():
+    with tempfile.TemporaryDirectory() as tmp:
+        state_file = Path(tmp) / "presence.json"
+        writer = PresenceWriter(state_file=state_file)
+        writer.set_session("test-model", "test-provider")
+        writer.tool_call("read_file", {"path": "writer.py"})
+        writer.reviewing_tool_results("read_file")
+
+        data = json.loads(state_file.read_text())
+        assert data["activity"]["state"] == "thinking"
+        assert data["activity"]["tool"] == "read_file"
+        assert data["activity"]["detail"] == "Reviewing file results"
+        assert data["activity"]["tool_started_at"] is not None
+
+
 def test_wsl_username_helper_does_not_create_nul_file(tmp_path, monkeypatch):
     class Result:
         stdout = "LOGI4K\n"
@@ -73,3 +88,26 @@ def test_wsl_username_helper_does_not_create_nul_file(tmp_path, monkeypatch):
 
     assert writer_mod._get_windows_username() == "LOGI4K"
     assert not (tmp_path / "nul").exists()
+
+
+def test_get_writer_preserves_session_id_for_singleton(tmp_path):
+    writer_mod._writers.clear()
+    state_file = tmp_path / "presence_test-session.json"
+
+    writer = writer_mod.get_writer(state_file=state_file, session_id="test-session")
+
+    assert writer._session_id == "test-session"
+    assert writer_mod.get_writer(state_file=state_file) is writer
+
+
+def test_get_writer_backfills_session_id_on_existing_singleton(tmp_path):
+    writer_mod._writers.clear()
+    state_file = tmp_path / "presence_test-session.json"
+
+    writer = writer_mod.get_writer(state_file=state_file)
+    assert writer._session_id == ""
+
+    same_writer = writer_mod.get_writer(state_file=state_file, session_id="test-session")
+
+    assert same_writer is writer
+    assert same_writer._session_id == "test-session"

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from pypresence import Presence, DiscordNotFound, PipeClosed
 
-CLIENT_ID = "YOUR_CLIENT_ID_HERE"
+CLIENT_ID = os.environ.get("HERMES_DISCORD_CLIENT_ID") or os.environ.get("DISCORD_CLIENT_ID") or ""
 STATE_FILE = Path(os.environ.get("APPDATA", "")) / "hermes_presence.json"
 
 # Try ALL pipes — maintain separate connections for stable + Canary
@@ -46,6 +46,10 @@ TOOL_ICON_MAP = {
     "memory": "status_standby",  # Background task
     "skill_view": "status_researching",  # Loading reference
 }
+
+if not CLIENT_ID:
+    print("[fatal] Set HERMES_DISCORD_CLIENT_ID before running legacy run_presence.py", flush=True)
+    sys.exit(1)
 
 print(f"STATE_FILE: {STATE_FILE}", flush=True)
 

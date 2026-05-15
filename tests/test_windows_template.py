@@ -17,6 +17,8 @@ def test_windows_monitor_template_displays_model_and_reasoning_metadata():
         "123",
         "presence.json",
         fallback_reasoning_effort="high",
+        show_reasoning=True,
+        privacy_mode=False,
     )
 
     assert 'DEFAULT_REASONING_EFFORT = "high"' in script
@@ -26,6 +28,31 @@ def test_windows_monitor_template_displays_model_and_reasoning_metadata():
     assert '"large_text": " | ".join(hover_parts)' in script
     assert "hash_parts = [" in script
     assert "reasoning_effort," in script
+
+
+def test_windows_monitor_template_ages_out_stale_working_tools():
+    script = _monitor_script_content(
+        "123",
+        "presence.json",
+        privacy_mode=False,
+    )
+
+    assert "stale_working_seconds = 90" in script
+    assert 'detail = "Waiting for next request"' in script
+    assert 'state_name = "idle"' in script
+    assert "tool_age >= stale_working_seconds" in script
+
+
+def test_windows_monitor_template_is_private_and_singleton_by_default():
+    script = _monitor_script_content("123", "presence.json")
+
+    assert "SHOW_REASONING = False" in script
+    assert "PRIVACY_MODE = True" in script
+    assert "CreateMutexW" in script
+    assert "Local\\\\HermesPresenceMonitor_main" in script
+    assert 'model = ""' in script
+    assert 'provider = ""' in script
+    assert 'reasoning_effort = ""' in script
 
 
 def test_windows_startup_launcher_uses_pythonw_and_hidden_wscript_run(monkeypatch):

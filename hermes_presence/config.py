@@ -34,21 +34,21 @@ DISABLE_MARKER = Path.home() / ".hermes" / ".presence_disabled"
 
 @dataclass
 class DisplayConfig:
-    show_model: bool = True
-    show_provider: bool = True
-    show_reasoning: bool = True
-    privacy_mode: bool = False
+    show_model: bool = False
+    show_provider: bool = False
+    show_reasoning: bool = False
+    privacy_mode: bool = True
     idle_timeout: int = 10
     large_image: str = "hermes_logo"
     large_text: str = "Hermes Agent"
     # v3.4.0: zombie detection multiplier (default 2x idle_timeout)
     zombie_timeout_multiplier: int = 2
     # v3.4.0: show profile name in Discord state
-    show_profile: bool = True
+    show_profile: bool = False
     # v3.4.0: show cost in Discord detail
-    show_cost: bool = True
+    show_cost: bool = False
     # v3.4.0: dynamic provider logos
-    provider_logo_mode: bool = True
+    provider_logo_mode: bool = False
 
 
 @dataclass
@@ -159,11 +159,21 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
             # display section
             if "display" in raw:
                 dp = raw["display"]
-                for key in ("show_model", "show_provider", "show_reasoning", "privacy_mode"):
+                for key in (
+                    "show_model",
+                    "show_provider",
+                    "show_reasoning",
+                    "privacy_mode",
+                    "show_profile",
+                    "show_cost",
+                    "provider_logo_mode",
+                ):
                     if key in dp:
                         setattr(config.display, key, bool(dp[key]))
                 if "idle_timeout" in dp:
                     config.display.idle_timeout = int(dp["idle_timeout"])
+                if "zombie_timeout_multiplier" in dp:
+                    config.display.zombie_timeout_multiplier = int(dp["zombie_timeout_multiplier"])
                 for key in ("large_image", "large_text"):
                     if key in dp:
                         setattr(config.display, key, str(dp[key]))
@@ -197,6 +207,8 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
                     config.advanced.pipe_connect_retry = int(a["pipe_connect_retry"])
                 if "log_file" in a:
                     config.advanced.log_file = str(a["log_file"])
+                if "cost_tracker_file" in a:
+                    config.advanced.cost_tracker_file = str(a["cost_tracker_file"])
 
             # notify section
             if "notify" in raw:
@@ -294,6 +306,8 @@ def save_config(config: PresenceConfig, config_path: Optional[Path] = None):
             cleaned = {}
             for k, v in section_data.items():
                 if k in _keep:
+                    cleaned[k] = v
+                elif isinstance(v, bool):
                     cleaned[k] = v
                 elif isinstance(v, list):
                     cleaned[k] = v  # preserve empty lists

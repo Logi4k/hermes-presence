@@ -105,7 +105,12 @@ def _cleanup_stale_state_files(state_dir: Path, max_age_seconds: int = 3600) -> 
     cutoff = datetime.now(timezone.utc).timestamp() - max_age_seconds
     removed = 0
 
-    for f in state_dir.glob("presence_*.json"):
+    candidates = list(state_dir.glob("presence_*.json"))
+    legacy = state_dir / "presence.json"
+    if legacy.exists():
+        candidates.append(legacy)
+
+    for f in dict.fromkeys(candidates):
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
             ts_str = data.get("timestamp", "")
@@ -291,10 +296,10 @@ class UnifiedMonitor:
         state_file: Path,
         exclude_tools: Optional[list[str]] = None,
         idle_timeout: int = 10,
-        show_model: bool = True,
-        show_provider: bool = True,
-        show_reasoning: bool = True,
-        privacy_mode: bool = False,
+        show_model: bool = False,
+        show_provider: bool = False,
+        show_reasoning: bool = False,
+        privacy_mode: bool = True,
         poll_interval: int = 5,
         pipe_connect_retry: int = 3,
         large_image: str = "hermes_logo",
@@ -304,9 +309,9 @@ class UnifiedMonitor:
         custom_buttons: Optional[list[dict]] = None,
         logger=None,
         # v3.4.0 features
-        show_profile: bool = True,
-        show_cost: bool = True,
-        provider_logo_mode: bool = True,
+        show_profile: bool = False,
+        show_cost: bool = False,
+        provider_logo_mode: bool = False,
         zombie_timeout_multiplier: int = 2,
         cost_tracker_file: Optional[Path] = None,
     ):
@@ -574,19 +579,28 @@ class UnifiedMonitor:
 
         # v3.4.0 F1: heartbeat / zombie detection
         self._zombie_cleared = False
+        state_age_secs: Optional[float] = None
         if ts_str:
             try:
                 ts_epoch = datetime.fromisoformat(ts_str).timestamp()
+                state_age_secs = datetime.now(timezone.utc).timestamp() - ts_epoch
                 # Only track fresh states (ignore old test fixtures)
-                age_secs = datetime.now(timezone.utc).timestamp() - ts_epoch
-                if age_secs < 86400:  # only track states created within 24h
+                if state_age_secs < 86400:
                     self._last_seen_timestamp = ts_epoch
             except ValueError:
                 pass
 
+        zombie_threshold = max(1, self.idle_timeout * self.zombie_timeout_multiplier)
+        if tui_count == 0 and state_age_secs is not None and state_age_secs >= zombie_threshold:
+            self.disconnect_all()
+            self.last_hash = ""
+            self._zombie_cleared = True
+            mins = int(state_age_secs // 60)
+            print(f"[clear] State stale ({mins}m old, no TUI sessions), cleared Discord", flush=True)
+            return
+
         if self._last_seen_timestamp and self.last_hash:
             stale_secs = datetime.now(timezone.utc).timestamp() - self._last_seen_timestamp
-            zombie_threshold = self.idle_timeout * self.zombie_timeout_multiplier
             if stale_secs >= zombie_threshold and not self._zombie_cleared:
                 self.disconnect_all()
                 self.last_hash = ""
@@ -594,6 +608,20 @@ class UnifiedMonitor:
                 mins = int(stale_secs // 60)
                 print(f"[clear] State stale ({mins}m old), cleared Discord", flush=True)
                 return
+
+        # If a post-tool hook is missed, stale in-progress tools can remain
+        # visible forever while the TUI is still open. Age them out to idle.
+        stale_working_seconds = max(90, self.idle_timeout * 6)
+        if state_name == "working" and tool_started_at:
+            try:
+                tool_age_secs = datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(tool_started_at).timestamp()
+            except ValueError:
+                tool_age_secs = 0
+            if tool_age_secs >= stale_working_seconds:
+                state_name = "idle"
+                detail = "Waiting for next request"
+                tool = ""
+                tool_started_at = None
 
         # ---- Tool exclude filter ----
         if self.privacy_mode:
@@ -619,7 +647,7 @@ class UnifiedMonitor:
 
         # ---- Model + provider display ----
         model_label = ""
-        if self.show_model:
+        if self.show_model and not self.privacy_mode:
             model_label = _format_model_label(
                 sess.get("model", ""),
                 sess.get("provider", ""),
@@ -628,7 +656,7 @@ class UnifiedMonitor:
         if model_label:
             state_text = f"{state_text} -- {model_label}"
 
-        if self.show_reasoning:
+        if self.show_reasoning and not self.privacy_mode:
             reasoning_label = _format_reasoning_label(sess.get("reasoning_effort", ""))
         else:
             reasoning_label = ""
@@ -642,7 +670,7 @@ class UnifiedMonitor:
             fname = state_file.name if isinstance(state_file, Path) else ""
             if "_presence" in fname and fname != "presence.json":
                 profile = fname.split("_presence")[0] or ""
-        if self.show_profile and profile and profile not in ("presence", "main"):
+        if self.show_profile and not self.privacy_mode and profile and profile not in ("presence", "main"):
             state_text = f"{state_text} | {profile}"
 
         hover_parts = []
@@ -661,7 +689,7 @@ class UnifiedMonitor:
         # ---- v3.4.0 F4: provider logo ----
         provider = str(sess.get("provider", "") or "").lower().strip()
         large_image = self.large_image
-        if self.provider_logo_mode and provider:
+        if self.provider_logo_mode and not self.privacy_mode and provider:
             large_image = _resolve_provider_logo(provider)
 
         # ---- Per-tool timer ----
@@ -711,7 +739,7 @@ class UnifiedMonitor:
                 ct = self.cost_tracker_file
             _save_cost(ct, self._daily_cost, today)
 
-            if self.show_cost:
+            if self.show_cost and not self.privacy_mode:
                 cost_display = f"Session: ${float(cost):.2f}"
                 if self._daily_cost > float(cost):
                     cost_display = f"{cost_display} | Today: ${self._daily_cost:.2f}"

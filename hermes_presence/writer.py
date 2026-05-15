@@ -28,6 +28,37 @@ def _humanize_tool_name(tool_name: str) -> str:
     return " ".join(part.capitalize() for part in cleaned.split()) or "Tool"
 
 
+def _compact_command(command: str, max_len: int = 72) -> str:
+    """Return a short, Discord-safe command preview."""
+    compact = " ".join(str(command or "").split())
+    if len(compact) > max_len:
+        compact = compact[: max_len - 3].rstrip() + "..."
+    return compact
+
+
+def _terminal_detail(command: str) -> str:
+    """Turn shell commands into an intuitive activity label."""
+    cmd = " ".join(str(command or "").split())
+    lower = cmd.lower()
+    if not cmd:
+        return "Running shell task"
+    if "pytest" in lower or "vitest" in lower or "npm test" in lower or "pnpm test" in lower:
+        return "Running tests"
+    if "py_compile" in lower or "tsc" in lower or "typecheck" in lower or "lint" in lower:
+        return "Checking code quality"
+    if lower.startswith("git status") or " git status" in lower:
+        return "Checking repository status"
+    if lower.startswith("git diff") or " git diff" in lower:
+        return "Reviewing code changes"
+    if "hermes-presence update" in lower:
+        return "Updating Discord presence"
+    if "hermes-presence status" in lower:
+        return "Checking Discord presence"
+    if "powershell" in lower and "get-process" in lower:
+        return "Checking Windows processes"
+    return f"Shell: {_compact_command(cmd)}"
+
+
 class PresenceWriter:
     """Writes state updates to presence.json for Discord monitor consumption.
 
@@ -199,6 +230,9 @@ class PresenceWriter:
         detail = icon["detail"]
         large_image = icon.get("large_image", "status_active")
 
+        if tool_name == "terminal" and params:
+            detail = _terminal_detail(str(params.get("command", "")))
+
         # Substitute path if available
         if "{path}" in detail and params:
             path_val = params.get("path", params.get("command", ""))
@@ -235,6 +269,24 @@ class PresenceWriter:
         self._write_state(
             state="thinking",
             detail="Composing reply",
+            large_image="status_working",
+        )
+
+    def reviewing_tool_results(self, tool_name: str = ""):
+        """Keep presence active after a fast tool call while Hermes reviews output."""
+        self._current_tool = tool_name or self._current_tool
+        if self._tool_started_at is None:
+            self._tool_started_at = datetime.now(timezone.utc).isoformat()
+        tool_label = _humanize_tool_name(self._current_tool or tool_name or "tool")
+        reviewing_label = tool_label
+        for prefix in ("Reading ", "Read ", "Editing ", "Edit ", "Searching ", "Search ", "Checking ", "Check ", "Browsing ", "Browse ", "Running ", "Run "):
+            if reviewing_label.startswith(prefix):
+                reviewing_label = reviewing_label[len(prefix):]
+                break
+        self._write_state(
+            state="thinking",
+            tool=self._current_tool,
+            detail=f"Reviewing {reviewing_label.lower()} results",
             large_image="status_working",
         )
 
@@ -531,10 +583,18 @@ def _get_windows_username() -> str:
 _writers: dict[str, PresenceWriter] = {}
 
 
-def get_writer(state_file: Optional[Path] = None) -> PresenceWriter:
-    """Get or create the PresenceWriter for the given state file."""
+def get_writer(state_file: Optional[Path] = None, session_id: str = "") -> PresenceWriter:
+    """Get or create the PresenceWriter for the given state file.
+
+    The state file path alone is not enough on WSL: Windows mirroring uses the
+    writer's session_id to choose the mirror filename. Without passing it here,
+    per-session WSL files collapse back into the legacy hermes_presence.json
+    mirror and the Windows monitor loses session-specific activity.
+    """
     sf = Path(state_file) if state_file else DEFAULT_STATE_FILE
     key = str(sf)
     if key not in _writers:
-        _writers[key] = PresenceWriter(sf)
+        _writers[key] = PresenceWriter(sf, session_id=session_id)
+    elif session_id and not _writers[key]._session_id:
+        _writers[key]._session_id = session_id
     return _writers[key]
