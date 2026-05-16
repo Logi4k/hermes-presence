@@ -218,8 +218,16 @@ def _state_age_seconds(data: dict[str, Any]) -> Optional[float]:
 def _project_from_cwd(cwd: str) -> str:
     clean = str(cwd or "").rstrip("/")
     if not clean:
-        return "Hermes"
-    return Path(clean).name or "Hermes"
+        return "Hermes TUI"
+    name = Path(clean).name or "Hermes TUI"
+    if name == "hermes-projects":
+        return "Hermes TUI"
+    return name
+
+
+def _known_session_value(old_session: dict[str, Any], key: str) -> str:
+    value = str(old_session.get(key, "") or "").strip()
+    return "" if value.lower() == "unknown" else value
 
 
 def _synthesise_active_tui_state(session: dict[str, Any], existing: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -257,9 +265,10 @@ def _synthesise_active_tui_state(session: dict[str, Any], existing: Optional[dic
             "id": sid,
             "started_at": started_at,
             "duration_seconds": 0,
-            "model": old_session.get("model", "unknown"),
-            "provider": old_session.get("provider", "unknown"),
+            "model": _known_session_value(old_session, "model"),
+            "provider": _known_session_value(old_session, "provider"),
             "reasoning_effort": old_session.get("reasoning_effort", ""),
+            "current_task": old_session.get("current_task", ""),
             "tool_calls_count": old_session.get("tool_calls_count", 0),
             "subagent_count": old_session.get("subagent_count", 0),
             "files_modified": old_session.get("files_modified", 0),
@@ -479,9 +488,10 @@ def _format_presence_lines(
     detail: str,
     model_label: str,
     workspace: dict[str, Any],
-    target: str,
+    target: str = "",
+    current_task: str = "",
 ) -> tuple[str, str]:
-    """Return (details, state) for a cleaner Discord presence layout."""
+
     action = _action_label(state_name, tool, detail)
     lead = model_label or "Hermes"
     project = str(workspace.get("project", "") or "").strip()
@@ -491,8 +501,16 @@ def _format_presence_lines(
         details = f"{lead} {action}"
 
     state_parts = _workspace_parts(workspace, target)
-    if not state_parts and detail:
-        state_parts = [detail]
+    task_text = str(current_task or "").strip()
+    if task_text:
+        task_label = f"Task: {task_text}"
+        if task_label not in state_parts:
+            state_parts.append(task_label)
+    detail_text = str(detail or "").strip()
+    if detail_text.startswith("Task:") and detail_text not in state_parts:
+        state_parts.append(detail_text)
+    elif not state_parts and detail_text:
+        state_parts = [detail_text]
     state_text = " | ".join(state_parts) or action.capitalize()
     return _clip(details), _clip(state_text)
 
@@ -890,6 +908,7 @@ class UnifiedMonitor:
             model_label,
             workspace,
             target,
+            str(sess.get("current_task", "") or ""),
         )
         if self.privacy_mode:
             details = _clip(detail or "Working privately")

@@ -166,6 +166,7 @@ class PresenceWriter:
         self._error_msg: Optional[str] = None
         self._subagent_tasks: list[str] = []
         self._current_target: str = ""
+        self._current_task: str = ""
 
     def _restore_from_state_file(self):
         """Restore model/provider and session stats from the existing state file.
@@ -182,12 +183,15 @@ class PresenceWriter:
             model = sess.get("model", "")
             provider = sess.get("provider", "")
             reasoning_effort = sess.get("reasoning_effort", "")
+            current_task = sess.get("current_task", "")
             if model and model != "unknown":
                 self._current_model = model
             if provider and provider != "unknown":
                 self._current_provider = provider
             if reasoning_effort:
                 self._reasoning_effort = str(reasoning_effort)
+            if current_task:
+                self._current_task = str(current_task)
             # Also restore accumulated stats
             self._tool_calls_count = sess.get("tool_calls_count", 0)
             self._files_modified = sess.get("files_modified", 0)
@@ -339,11 +343,31 @@ class PresenceWriter:
             large_image=large_image,
         )
 
-    def thinking(self):
+    def update_session_metadata(
+        self,
+        model: str = "",
+        provider: str = "",
+        profile: Optional[str] = None,
+        reasoning_effort: str = "",
+        current_task: str = "",
+    ):
+        """Update model/provider/profile/task without resetting per-session counters."""
+        if model and model != "unknown":
+            self._current_model = model
+        if provider and provider != "unknown":
+            self._current_provider = provider
+        if reasoning_effort:
+            self._reasoning_effort = str(reasoning_effort)
+        if profile:
+            self._profile = profile
+        if current_task:
+            self._current_task = str(current_task).strip()[:96]
+
+    def thinking(self, detail: str = "Composing reply"):
         """Signal that the model is composing the assistant reply."""
         self._write_state(
             state="thinking",
-            detail="Composing reply",
+            detail=detail or "Composing reply",
             large_image="status_working",
         )
 
@@ -492,8 +516,9 @@ class PresenceWriter:
         model = self._current_model
         provider = self._current_provider
         reasoning_effort = self._reasoning_effort
+        current_task = self._current_task
         if (
-            model == "unknown" or provider == "unknown" or not reasoning_effort
+            model == "unknown" or provider == "unknown" or not reasoning_effort or not current_task
         ) and self._state_file.exists():
             try:
                 existing = json.loads(self._state_file.read_text(encoding="utf-8"))
@@ -507,6 +532,8 @@ class PresenceWriter:
                     provider = sess["provider"]
                 if not reasoning_effort and sess.get("reasoning_effort"):
                     reasoning_effort = str(sess["reasoning_effort"])
+                if not current_task and sess.get("current_task"):
+                    current_task = str(sess["current_task"])
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -534,6 +561,7 @@ class PresenceWriter:
                 "model": model,
                 "provider": provider,
                 "reasoning_effort": reasoning_effort,
+                "current_task": current_task,
                 "tool_calls_count": self._tool_calls_count,
                 "subagent_count": self._subagent_count,
                 "files_modified": self._files_modified,

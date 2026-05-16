@@ -839,7 +839,7 @@ def _workspace_parts(workspace, target):
     return parts
 
 
-def _format_presence_lines(state_name, tool, detail, model_label, workspace, target):
+def _format_presence_lines(state_name, tool, detail, model_label, workspace, target, current_task=""):
     action = _action_label(state_name, tool, detail)
     lead = model_label or "Hermes"
     project = ""
@@ -850,8 +850,16 @@ def _format_presence_lines(state_name, tool, detail, model_label, workspace, tar
     else:
         details = f"{{lead}} {{action}}"
     state_parts = _workspace_parts(workspace, target)
-    if not state_parts and detail:
-        state_parts = [detail]
+    task_text = str(current_task or "").strip()
+    if task_text:
+        task_label = f"Task: {{task_text}}"
+        if task_label not in state_parts:
+            state_parts.append(task_label)
+    detail_text = str(detail or "").strip()
+    if detail_text.startswith("Task:") and detail_text not in state_parts:
+        state_parts.append(detail_text)
+    elif not state_parts and detail_text:
+        state_parts = [detail_text]
     state_text = " | ".join(state_parts) or action.capitalize()
     return _clip(details), _clip(state_text)
 
@@ -921,6 +929,32 @@ def cwd(pid):
     except Exception:
         return ''
 
+def read_env(pid):
+    try:
+        entries = Path('/proc', str(pid), 'environ').read_bytes().split(b'\\0')
+        env = {{}}
+        for entry in entries:
+            if not entry or b'=' not in entry:
+                continue
+            key, value = entry.split(b'=', 1)
+            env[key.decode('utf-8','replace')] = value.decode('utf-8','replace')
+        return env
+    except Exception:
+        return {{}}
+
+def active_session_id_from_env(pid):
+    env = read_env(pid)
+    active_file = env.get('HERMES_TUI_ACTIVE_SESSION_FILE', '')
+    if active_file:
+        try:
+            data = json.loads(Path(active_file).read_text(errors='replace'))
+            sid = str(data.get('session_id', '') or '').strip()
+            if sid:
+                return sid
+        except Exception:
+            pass
+    return str(env.get('HERMES_SESSION_ID', '') or '').strip()
+
 procs=[]
 for entry in Path('/proc').iterdir():
     if not entry.name.isdigit():
@@ -947,9 +981,12 @@ def descendant_keys(root):
         if pid in seen:
             continue
         seen.add(pid)
+        env_sid=active_session_id_from_env(pid)
+        if env_sid and env_sid not in out:
+            out.append(env_sid)
         for child in children.get(pid, []):
             queue.append(child['pid'])
-            key=arg_value(child['args'], '--session-key')
+            key=arg_value(child['args'], '--session-key') or active_session_id_from_env(child['pid'])
             if key and key not in out:
                 out.append(key)
     return out
@@ -1074,6 +1111,7 @@ def _synthesise_active_tui_state(session, existing=None):
             'model': _known_session_value(old_session, 'model'),
             'provider': _known_session_value(old_session, 'provider'),
             'reasoning_effort': old_session.get('reasoning_effort', ''),
+            'current_task': old_session.get('current_task', ''),
             'tool_calls_count': old_session.get('tool_calls_count', 0),
             'subagent_count': old_session.get('subagent_count', 0),
             'files_modified': old_session.get('files_modified', 0),
@@ -1298,6 +1336,7 @@ while True:
             model_label,
             workspace,
             target,
+            str(sess.get("current_task", "") or ""),
         )
         if PRIVACY_MODE:
             details = _clip(detail or "Working privately")

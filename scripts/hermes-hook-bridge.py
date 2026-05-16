@@ -86,6 +86,32 @@ def _payload_session_id(payload: dict) -> str:
     return _SESSION_ID or str(_payload_value(payload, "session_id", "") or "").strip()
 
 
+def _compact_task(value: str, max_len: int = 96) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    return text if len(text) <= max_len else text[: max_len - 3].rstrip() + "..."
+
+
+def _model_provider(payload: dict) -> tuple[str, str]:
+    model = str(_payload_value(payload, "model", os.environ.get("HERMES_MODEL", "unknown")) or "unknown")
+    provider = str(_payload_value(payload, "provider", os.environ.get("HERMES_PROVIDER", "unknown")) or "unknown")
+    return model, provider
+
+
+def _sync_session_metadata(payload: dict, writer):
+    model, provider = _model_provider(payload)
+    reasoning = str(_payload_value(payload, "reasoning_effort", "") or "")
+    current_task = _compact_task(str(_payload_value(payload, "user_message", "") or ""))
+    writer.update_session_metadata(
+        model=model,
+        provider=provider,
+        profile=_PROFILE,
+        reasoning_effort=reasoning,
+        current_task=current_task,
+    )
+
+
 def handle_pre_tool_call(payload: dict, writer):
     """Tool about to execute."""
     tool_name = payload.get("tool_name", "unknown")
@@ -119,8 +145,8 @@ def handle_post_tool_call(payload: dict, writer):
 def handle_pre_llm_call(payload: dict, writer):
     """Before LLM call — model info, thinking state."""
     is_first_turn = bool(_payload_value(payload, "is_first_turn", False))
-    model = _payload_value(payload, "model", os.environ.get("HERMES_MODEL", "unknown"))
-    provider = _payload_value(payload, "provider", os.environ.get("HERMES_PROVIDER", "unknown"))
+    model, provider = _model_provider(payload)
+    task = _compact_task(str(_payload_value(payload, "user_message", "") or ""))
 
     if is_first_turn:
         writer.set_session(
@@ -131,8 +157,35 @@ def handle_pre_llm_call(payload: dict, writer):
             is_orchestrator=_IS_ORCHESTRATOR,
             profile=_PROFILE,
         )
+        writer.update_session_metadata(current_task=task)
     else:
+        _sync_session_metadata(payload, writer)
+    if task:
+        writer.thinking(f"Task: {task}")
+    elif not is_first_turn:
         writer.thinking()
+
+
+def handle_pre_api_request(payload: dict, writer):
+    """Immediately before the provider request, keep model/provider exact."""
+    _sync_session_metadata(payload, writer)
+    existing_detail = ""
+    try:
+        existing = json.loads(writer._state_file.read_text(encoding="utf-8"))
+        activity = existing.get("activity", {}) if isinstance(existing, dict) else {}
+        if str(activity.get("detail", "")).startswith("Task:"):
+            existing_detail = str(activity.get("detail", ""))
+    except Exception:
+        pass
+    writer.thinking(existing_detail or "Calling model")
+
+
+def handle_post_api_request(payload: dict, writer):
+    """After provider response, preserve the actual model/provider in state."""
+    _sync_session_metadata(payload, writer)
+    response_model = str(_payload_value(payload, "response_model", "") or "")
+    if response_model:
+        writer.update_session_metadata(model=response_model, profile=_PROFILE)
 
 
 def handle_post_llm_call(payload: dict, writer):
@@ -152,8 +205,7 @@ def handle_post_llm_call(payload: dict, writer):
 
 def handle_on_session_start(payload: dict, writer):
     """Session started."""
-    model = _payload_value(payload, "model", os.environ.get("HERMES_MODEL", "unknown"))
-    provider = _payload_value(payload, "provider", os.environ.get("HERMES_PROVIDER", "unknown"))
+    model, provider = _model_provider(payload)
     writer.set_session(
         model=model,
         provider=provider,
@@ -184,6 +236,8 @@ HANDLERS = {
     "post_tool_call": handle_post_tool_call,
     "pre_llm_call": handle_pre_llm_call,
     "post_llm_call": handle_post_llm_call,
+    "pre_api_request": handle_pre_api_request,
+    "post_api_request": handle_post_api_request,
     "on_session_start": handle_on_session_start,
     "on_session_end": handle_on_session_end,
     "subagent_stop": handle_subagent_stop,
