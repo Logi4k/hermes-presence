@@ -96,7 +96,8 @@ def _find_latest_state_file(
             ts_str = data.get("timestamp", "")
             if ts_str:
                 ts = datetime.fromisoformat(ts_str)
-                if allowed_session_ids is not None and _state_session_id(data) not in allowed_session_ids:
+                legacy_session_id = _state_session_id(data)
+                if allowed_session_ids is not None and legacy_session_id not in allowed_session_ids:
                     pass
                 else:
                     ts_epoch = ts.timestamp()
@@ -230,7 +231,10 @@ def _known_session_value(old_session: dict[str, Any], key: str) -> str:
     return "" if value.lower() == "unknown" else value
 
 
-def _synthesise_active_tui_state(session: dict[str, Any], existing: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def _synthesise_active_tui_state(
+    session: dict[str, Any],
+    existing: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Build a safe fresh idle state when the active TUI's hook state is stale."""
     existing = existing if isinstance(existing, dict) else {}
     now = datetime.now(timezone.utc).isoformat()
@@ -455,7 +459,15 @@ def _action_label(state_name: str, tool: str, detail: str) -> str:
         return "reviewing changes"
     if tool in {"patch", "write_file", "skill_manage"}:
         return "editing"
-    if tool in {"read_file", "search_files", "web_search", "web_extract", "session_search", "mem0local_search"}:
+    research_tools = {
+        "read_file",
+        "search_files",
+        "web_search",
+        "web_extract",
+        "session_search",
+        "mem0local_search",
+    }
+    if tool in research_tools:
         return "researching"
     if tool.startswith("browser_"):
         return "browsing"
@@ -785,7 +797,10 @@ class UnifiedMonitor:
             pass
 
         allowed_ids = active_tui_ids if self.tui_only else None
-        state_file, state = _find_latest_state_file(self.state_file.parent, allowed_session_ids=allowed_ids)
+        state_file, state = _find_latest_state_file(
+            self.state_file.parent,
+            allowed_session_ids=allowed_ids,
+        )
         if self.tui_only and state is not None and active_tui_sessions:
             stale_after = max(60, int(self.poll_interval) * 3)
             state_age = _state_age_seconds(state)
@@ -862,7 +877,8 @@ class UnifiedMonitor:
         stale_working_seconds = max(90, self.idle_timeout * 6)
         if state_name == "working" and tool_started_at:
             try:
-                tool_age_secs = datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(tool_started_at).timestamp()
+                tool_started_epoch = datetime.fromisoformat(tool_started_at).timestamp()
+                tool_age_secs = datetime.now(timezone.utc).timestamp() - tool_started_epoch
             except ValueError:
                 tool_age_secs = 0
             if tool_age_secs >= stale_working_seconds:
@@ -928,7 +944,13 @@ class UnifiedMonitor:
             fname = state_file.name if isinstance(state_file, Path) else ""
             if "_presence" in fname and fname != "presence.json":
                 profile = fname.split("_presence")[0] or ""
-        if self.show_profile and not self.privacy_mode and profile and profile not in ("presence", "main"):
+        should_show_profile = (
+            self.show_profile
+            and not self.privacy_mode
+            and profile
+            and profile not in ("presence", "main")
+        )
+        if should_show_profile:
             state_text = f"{state_text} | {profile}"
 
         hover_parts = []

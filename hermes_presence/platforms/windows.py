@@ -812,7 +812,15 @@ def _action_label(state_name, tool, detail):
         return "reviewing changes"
     if tool in {{"patch", "write_file", "skill_manage"}}:
         return "editing"
-    if tool in {{"read_file", "search_files", "web_search", "web_extract", "session_search", "mem0local_search"}}:
+    research_tools = {{
+        "read_file",
+        "search_files",
+        "web_search",
+        "web_extract",
+        "session_search",
+        "mem0local_search",
+    }}
+    if tool in research_tools:
         return "researching"
     if str(tool or "").startswith("browser_"):
         return "browsing"
@@ -876,7 +884,10 @@ def _windows_visible_cwds():
     try:
         ps = r"""
 Get-CimInstance Win32_Process |
-  Where-Object {{ $_.Name -match 'WindowsTerminal|OpenConsole|wsl' -or ($_.CommandLine -and $_.CommandLine -match 'tmux|hermes|--tui') }} |
+  Where-Object {{
+    $_.Name -match 'WindowsTerminal|OpenConsole|wsl' -or
+    ($_.CommandLine -and $_.CommandLine -match 'tmux|hermes|--tui')
+  }} |
   Select-Object Name,CommandLine |
   ConvertTo-Json -Depth 3
 """
@@ -897,7 +908,9 @@ Get-CimInstance Win32_Process |
     cwds = set()
     for row in rows if isinstance(rows, list) else []:
         cmd = str(row.get("CommandLine") or "")
-        match = re.search(r'--cd\s+"([^"]+)"', cmd) or re.search(r'--cd\s+([^\s]+)', cmd)
+        quoted_cd = re.search(r'--cd\\s+"([^"]+)"', cmd)
+        unquoted_cd = re.search(r'--cd\\s+([^\\s]+)', cmd)
+        match = quoted_cd or unquoted_cd
         if match:
             cwds.add(match.group(1))
     return cwds
@@ -910,7 +923,8 @@ from pathlib import Path
 
 def read_cmd(pid):
     try:
-        return [p.decode('utf-8','replace') for p in Path('/proc', pid, 'cmdline').read_bytes().split(b'\\0') if p]
+        raw_cmdline = Path('/proc', pid, 'cmdline').read_bytes()
+        return [p.decode('utf-8','replace') for p in raw_cmdline.split(b'\\0') if p]
     except Exception:
         return []
 
@@ -961,7 +975,12 @@ for entry in Path('/proc').iterdir():
         continue
     args=read_cmd(entry.name)
     if args:
-        procs.append({{'pid': int(entry.name), 'ppid': ppid(entry.name), 'args': args, 'cwd': cwd(entry.name)}})
+        procs.append({{
+            'pid': int(entry.name),
+            'ppid': ppid(entry.name),
+            'args': args,
+            'cwd': cwd(entry.name),
+        }})
 children={{}}
 for p in procs:
     children.setdefault(p.get('ppid'), []).append(p)
@@ -995,7 +1014,12 @@ sessions=[]
 for p in procs:
     args=p['args']; joined=' '.join(args).lower(); first=Path(args[0]).name.lower()
     is_python=first.startswith('python') and any(Path(a).name == 'hermes' for a in args[1:5])
-    is_tui=(first == 'hermes' or is_python) and ('--tui' in args or '--tui' in joined) and 'tui_gateway' not in joined and 'slash_worker' not in joined
+    is_tui = (
+        (first == 'hermes' or is_python)
+        and ('--tui' in args or '--tui' in joined)
+        and 'tui_gateway' not in joined
+        and 'slash_worker' not in joined
+    )
     if not is_tui:
         continue
     keys=descendant_keys(p['pid'])

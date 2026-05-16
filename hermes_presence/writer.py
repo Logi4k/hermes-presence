@@ -378,7 +378,21 @@ class PresenceWriter:
             self._tool_started_at = datetime.now(timezone.utc).isoformat()
         tool_label = _humanize_tool_name(self._current_tool or tool_name or "tool")
         reviewing_label = tool_label
-        for prefix in ("Reading ", "Read ", "Editing ", "Edit ", "Searching ", "Search ", "Checking ", "Check ", "Browsing ", "Browse ", "Running ", "Run "):
+        transient_prefixes = (
+            "Reading ",
+            "Read ",
+            "Editing ",
+            "Edit ",
+            "Searching ",
+            "Search ",
+            "Checking ",
+            "Check ",
+            "Browsing ",
+            "Browse ",
+            "Running ",
+            "Run ",
+        )
+        for prefix in transient_prefixes:
             if reviewing_label.startswith(prefix):
                 reviewing_label = reviewing_label[len(prefix):]
                 break

@@ -558,10 +558,13 @@ def _cmd_cleanup_profiles(args):
     for profile in args.profiles:
         if dry_run:
             launcher = windows.WindowsLauncher("", Path("presence.json"), profile=profile)
+            legacy_disabled_path = launcher._legacy_bat_path().with_suffix(
+                launcher._legacy_bat_path().suffix + ".disabled"
+            )
             candidate_paths = [
                 launcher._startup_script_path(),
                 launcher._legacy_bat_path(),
-                launcher._legacy_bat_path().with_suffix(launcher._legacy_bat_path().suffix + ".disabled"),
+                legacy_disabled_path,
                 launcher._monitor_target,
             ]
             for path in candidate_paths:
