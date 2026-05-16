@@ -233,11 +233,13 @@ class WindowsLauncher(PlatformLauncher):
         profile: str = "main",
         show_reasoning: bool = False,
         privacy_mode: bool = True,
+        tui_only: bool = False,
     ):
         super().__init__(client_id, state_file)
         self.profile = profile
         self.show_reasoning = show_reasoning
         self.privacy_mode = privacy_mode
+        self.tui_only = tui_only
         # Task name differs for non-default profiles
         self._task_name = f"{profile.capitalize()}Presence" if profile != "main" else TASK_NAME
         # Monitor target differs for non-default
@@ -265,6 +267,22 @@ class WindowsLauncher(PlatformLauncher):
                 _run_win(["schtasks", "/Change", "/TN", task_name, "/Disable"], timeout=10)
             except Exception:
                 pass
+
+    def _remove_startup_fallback(self) -> None:
+        """Remove Startup-folder fallback launchers when Scheduled Task is active."""
+        for launcher in (self._startup_script_path(), self._legacy_bat_path()):
+            try:
+                launcher.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        disabled_bat = self._legacy_bat_path().with_suffix(
+            self._legacy_bat_path().suffix + ".disabled"
+        )
+        try:
+            disabled_bat.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     def _find_python(self) -> str:
         """Locate Python on Windows. Uses cached result, then a priority chain:
@@ -374,6 +392,7 @@ class WindowsLauncher(PlatformLauncher):
             fallback_reasoning_effort=_current_reasoning_effort(),
             show_reasoning=self.show_reasoning,
             privacy_mode=self.privacy_mode,
+            tui_only=self.tui_only,
         )
         try:
             self._monitor_target.parent.mkdir(parents=True, exist_ok=True)
@@ -403,6 +422,7 @@ class WindowsLauncher(PlatformLauncher):
                 ]
             )
             if result.returncode == 0:
+                self._remove_startup_fallback()
                 _run_win(["schtasks", "/Run", "/TN", self._task_name])
                 print("[OK] Scheduled Task created and started")
                 return True
@@ -580,6 +600,7 @@ def _monitor_script_content(
     fallback_reasoning_effort: str = "",
     show_reasoning: bool = False,
     privacy_mode: bool = True,
+    tui_only: bool = False,
 ) -> str:
     mirror_name = "hermes_presence.json" if profile == "main" else f"{profile}_presence.json"
     return f'''"""
@@ -594,6 +615,8 @@ import signal
 import sys
 import time
 import ctypes
+import subprocess
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -608,6 +631,7 @@ STATE_DIR = Path(os.environ.get("APPDATA", ""))
 DEFAULT_REASONING_EFFORT = "{fallback_reasoning_effort}"
 SHOW_REASONING = {str(show_reasoning)}
 PRIVACY_MODE = {str(privacy_mode)}
+TUI_ONLY = {str(tui_only)}
 PIPES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 _MUTEX_HANDLE = None
@@ -761,26 +785,311 @@ def _human_tool(tool):
     return " ".join(part.capitalize() for part in cleaned.split())
 
 
-def _format_state_text(state_name, tool, model_label, calls, subs):
-    """Build the lower Discord line as context, not another generic status."""
+def _clip(value, max_len=128):
+    text = str(value or "")
+    return text if len(text) <= max_len else text[: max_len - 3].rstrip() + "..."
+
+
+def _action_label(state_name, tool, detail):
+    if state_name == "error":
+        return "hit an error"
+    if state_name in ("thinking", "typing"):
+        return "thinking"
+    if state_name == "idle":
+        return "ready"
+    if state_name == "orchestrating":
+        return "orchestrating"
+    if state_name == "cron_job":
+        return "running a cron job"
+    if state_name == "session_ended":
+        return "session ended"
+    lower_detail = str(detail or "").lower()
+    if "running tests" in lower_detail:
+        return "running tests"
+    if "checking code quality" in lower_detail:
+        return "checking code"
+    if "reviewing code changes" in lower_detail:
+        return "reviewing changes"
+    if tool in {{"patch", "write_file", "skill_manage"}}:
+        return "editing"
+    if tool in {{"read_file", "search_files", "web_search", "web_extract", "session_search", "mem0local_search"}}:
+        return "researching"
+    if str(tool or "").startswith("browser_"):
+        return "browsing"
+    if str(tool or "").startswith("delegate_") or tool == "delegate_task":
+        return "delegating"
+    if state_name == "working":
+        return "working"
+    return str(state_name or "working").replace("_", " ")
+
+
+def _workspace_parts(workspace, target):
     parts = []
-    if tool:
-        parts.append(_human_tool(tool))
+    workspace = workspace if isinstance(workspace, dict) else {{}}
+    project = str(workspace.get("project", "") or "").strip()
+    branch = str(workspace.get("git_branch", "") or "").strip()
+    dirty = bool(workspace.get("git_dirty", False))
+    target = str(target or "").strip()
+    if project:
+        parts.append(project)
+    if branch:
+        parts.append(f"{{branch}}{{'*' if dirty else ''}}")
+    if target:
+        parts.append(target)
+    return parts
+
+
+def _format_presence_lines(state_name, tool, detail, model_label, workspace, target):
+    action = _action_label(state_name, tool, detail)
+    lead = model_label or "Hermes"
+    project = ""
+    if isinstance(workspace, dict):
+        project = str(workspace.get("project", "") or "").strip()
+    if project and action not in {{"ready", "session ended"}}:
+        details = f"{{lead}} {{action}} {{project}}"
     else:
-        parts.append(STATE_DISPLAY.get(state_name, "Hermes"))
-    if model_label:
-        parts.append(model_label)
-    if calls:
-        parts.append(f"{{calls}} tool{{'' if calls == 1 else 's'}}")
-    if subs:
-        parts.append(f"{{subs}} sub-agent{{'' if subs == 1 else 's'}}")
-    return " • ".join([p for p in parts if p])
+        details = f"{{lead}} {{action}}"
+    state_parts = _workspace_parts(workspace, target)
+    if not state_parts and detail:
+        state_parts = [detail]
+    state_text = " | ".join(state_parts) or action.capitalize()
+    return _clip(details), _clip(state_text)
+
+
+def _state_is_tui(data):
+    return bool(data.get("session", {{}}).get("is_tui", False))
+
+
+def _state_session_id(data):
+    return str(data.get("session", {{}}).get("id", "") or "").strip()
+
+
+def _windows_visible_cwds():
+    try:
+        ps = r"""
+Get-CimInstance Win32_Process |
+  Where-Object {{ $_.Name -match 'WindowsTerminal|OpenConsole|wsl' -or ($_.CommandLine -and $_.CommandLine -match 'tmux|hermes|--tui') }} |
+  Select-Object Name,CommandLine |
+  ConvertTo-Json -Depth 3
+"""
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return set()
+        rows = json.loads(result.stdout)
+        if isinstance(rows, dict):
+            rows = [rows]
+    except Exception:
+        return set()
+    cwds = set()
+    for row in rows if isinstance(rows, list) else []:
+        cmd = str(row.get("CommandLine") or "")
+        match = re.search(r'--cd\s+"([^"]+)"', cmd) or re.search(r'--cd\s+([^\s]+)', cmd)
+        if match:
+            cwds.add(match.group(1))
+    return cwds
+
+
+def _wsl_tui_sessions():
+    code = r"""
+import json, os
+from pathlib import Path
+
+def read_cmd(pid):
+    try:
+        return [p.decode('utf-8','replace') for p in Path('/proc', pid, 'cmdline').read_bytes().split(b'\\0') if p]
+    except Exception:
+        return []
+
+def ppid(pid):
+    try:
+        for line in Path('/proc', pid, 'status').read_text(errors='replace').splitlines():
+            if line.startswith('PPid:'):
+                return int(line.split()[1])
+    except Exception:
+        pass
+    return None
+
+def cwd(pid):
+    try:
+        return str(Path('/proc', pid, 'cwd').resolve())
+    except Exception:
+        return ''
+
+procs=[]
+for entry in Path('/proc').iterdir():
+    if not entry.name.isdigit():
+        continue
+    args=read_cmd(entry.name)
+    if args:
+        procs.append({{'pid': int(entry.name), 'ppid': ppid(entry.name), 'args': args, 'cwd': cwd(entry.name)}})
+children={{}}
+for p in procs:
+    children.setdefault(p.get('ppid'), []).append(p)
+
+def arg_value(args, flag):
+    for i, v in enumerate(args):
+        if v == flag and i + 1 < len(args):
+            return args[i+1]
+        if v.startswith(flag + '='):
+            return v.split('=', 1)[1]
+    return ''
+
+def descendant_keys(root):
+    out=[]; queue=[root]; seen=set()
+    while queue:
+        pid=queue.pop(0)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        for child in children.get(pid, []):
+            queue.append(child['pid'])
+            key=arg_value(child['args'], '--session-key')
+            if key and key not in out:
+                out.append(key)
+    return out
+
+sessions=[]
+for p in procs:
+    args=p['args']; joined=' '.join(args).lower(); first=Path(args[0]).name.lower()
+    is_python=first.startswith('python') and any(Path(a).name == 'hermes' for a in args[1:5])
+    is_tui=(first == 'hermes' or is_python) and ('--tui' in args or '--tui' in joined) and 'tui_gateway' not in joined and 'slash_worker' not in joined
+    if not is_tui:
+        continue
+    keys=descendant_keys(p['pid'])
+    sid=arg_value(args, '--resume') or arg_value(args, '--session-id') or (keys[-1] if keys else '')
+    sessions.append({{'session_id': sid, 'cwd': p['cwd'], 'descendant_session_keys': keys}})
+print(json.dumps(sessions))
+"""
+    try:
+        result = subprocess.run(
+            ["wsl.exe", "--", "python3", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        rows = json.loads(result.stdout)
+        return rows if isinstance(rows, list) else []
+    except Exception:
+        return []
+
+
+def _session_ids_from_tui_session(session):
+    ids = set()
+    sid = str(session.get('session_id', '') or '').strip()
+    if sid:
+        ids.add(sid)
+    for key in session.get('descendant_session_keys', []) or []:
+        if key:
+            ids.add(str(key))
+    return ids
+
+
+def _active_tui_sessions():
+    sessions = [s for s in _wsl_tui_sessions() if isinstance(s, dict)]
+    visible_cwds = _windows_visible_cwds()
+    visible = []
+    if visible_cwds:
+        for session in sessions:
+            if str(session.get('cwd', '') or '').strip() in visible_cwds:
+                visible.append(session)
+        if visible:
+            return visible
+    return sessions
+
+
+def _active_tui_session_ids():
+    ids = set()
+    for session in _active_tui_sessions():
+        ids.update(_session_ids_from_tui_session(session))
+    return ids
+
+
+def _state_age_seconds(data):
+    ts_str = str(data.get('timestamp', '') or '').strip()
+    if not ts_str:
+        return None
+    try:
+        return datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(ts_str).timestamp()
+    except ValueError:
+        return None
+
+
+def _project_from_cwd(cwd):
+    clean = str(cwd or '').rstrip('/')
+    if not clean:
+        return 'Hermes TUI'
+    name = Path(clean).name or 'Hermes TUI'
+    if name in {{'hermes-projects', 'hermes-project'}}:
+        return 'Hermes TUI'
+    return name
+
+
+def _known_session_value(old_session, key):
+    value = str(old_session.get(key, '') or '').strip()
+    return '' if value.lower() == 'unknown' else value
+
+
+def _synthesise_active_tui_state(session, existing=None):
+    existing = existing if isinstance(existing, dict) else {{}}
+    old_session = existing.get('session', {{}}) if isinstance(existing.get('session'), dict) else {{}}
+    now = datetime.now(timezone.utc).isoformat()
+    sid = str(old_session.get('id', '') or '').strip()
+    ids = _session_ids_from_tui_session(session)
+    if not sid:
+        sid = next(iter(ids), '')
+    cwd = str(session.get('cwd', '') or '').strip()
+    return {{
+        'version': 3,
+        'timestamp': now,
+        'profile': existing.get('profile', 'main'),
+        'activity': {{
+            'state': 'idle',
+            'tool': None,
+            'target': '',
+            'detail': 'Visible TUI active',
+            'large_image': 'status_idle',
+            'tool_started_at': None,
+            'is_error': False,
+            'error_msg': None,
+        }},
+        'workspace': {{
+            'cwd': cwd,
+            'project': _project_from_cwd(cwd),
+            'git_branch': '',
+            'git_dirty': False,
+        }},
+        'session': {{
+            'id': sid,
+            'started_at': old_session.get('started_at') or now,
+            'duration_seconds': 0,
+            'model': _known_session_value(old_session, 'model'),
+            'provider': _known_session_value(old_session, 'provider'),
+            'reasoning_effort': old_session.get('reasoning_effort', ''),
+            'tool_calls_count': old_session.get('tool_calls_count', 0),
+            'subagent_count': old_session.get('subagent_count', 0),
+            'files_modified': old_session.get('files_modified', 0),
+            'cost_usd': old_session.get('cost_usd', 0.0),
+            'is_tui': True,
+            'is_cron': False,
+            'is_orchestrator': False,
+        }},
+    }}
 
 
 def _find_latest_state_file(state_dir):
     """Scan for all presence_*.json files and return the newest by timestamp."""
     if not state_dir.exists():
         return None, None
+    active_ids = _active_tui_session_ids() if TUI_ONLY else set()
     candidates = []
     for f in state_dir.glob("presence_*.json"):
         try:
@@ -788,6 +1097,11 @@ def _find_latest_state_file(state_dir):
             ts_str = data.get("timestamp", "")
             if not ts_str:
                 continue
+            if TUI_ONLY:
+                if not _state_is_tui(data):
+                    continue
+                if active_ids and _state_session_id(data) not in active_ids:
+                    continue
             ts = datetime.fromisoformat(ts_str)
             candidates.append((f, data, ts.timestamp()))
         except (json.JSONDecodeError, ValueError, OSError):
@@ -798,15 +1112,38 @@ def _find_latest_state_file(state_dir):
         try:
             data = json.loads(legacy.read_text(encoding="utf-8"))
             ts_str = data.get("timestamp", "")
+            if TUI_ONLY:
+                if not _state_is_tui(data):
+                    ts_str = ""
+                elif active_ids and _state_session_id(data) not in active_ids:
+                    ts_str = ""
             if ts_str:
                 ts = datetime.fromisoformat(ts_str)
                 candidates.append((legacy, data, ts.timestamp()))
         except (json.JSONDecodeError, ValueError, OSError):
             pass
     if not candidates:
+        if TUI_ONLY:
+            active_sessions = _active_tui_sessions()
+            if active_sessions:
+                return None, _synthesise_active_tui_state(active_sessions[0])
         return None, None
     candidates.sort(key=lambda x: x[2], reverse=True)
-    return candidates[0][0], candidates[0][1]
+    selected_file, selected_state, _ = candidates[0]
+    if TUI_ONLY:
+        active_sessions = _active_tui_sessions()
+        state_age = _state_age_seconds(selected_state)
+        if active_sessions and state_age is not None and state_age >= 60:
+            selected_sid = _state_session_id(selected_state)
+            selected_session = next(
+                (
+                    session for session in active_sessions
+                    if selected_sid in _session_ids_from_tui_session(session)
+                ),
+                active_sessions[0],
+            )
+            selected_state = _synthesise_active_tui_state(selected_session, selected_state)
+    return selected_file, selected_state
 
 
 print("[MONITOR] Starting Hermes Presence v3.4.2 (all-pipe, multi-session)", flush=True)
@@ -950,17 +1287,24 @@ while True:
             provider = ""
             reasoning_effort = ""
 
-        # Context line: tool/model/session stats. Keep the action itself in details.
+        # Context line: project/branch/file. Keep the model in details.
         model_label = _format_model_label(model, provider)
-        state_text = _format_state_text(state_name, tool, model_label, calls, subs)
+        workspace = data.get("workspace", {{}})
+        target = act.get("target", "") or ""
+        details, state_text = _format_presence_lines(
+            state_name,
+            tool,
+            detail,
+            model_label,
+            workspace,
+            target,
+        )
+        if PRIVACY_MODE:
+            details = _clip(detail or "Working privately")
+            state_text = STATE_DISPLAY.get(state_name, "Hermes")
         reasoning_label = _format_reasoning_label(reasoning_effort) if SHOW_REASONING else ""
         if reasoning_label:
-            state_text = f"{{state_text}} • {{reasoning_label}}"
-
-        # Details
-        if detail and len(detail) > 128:
-            detail = detail[:125] + "..."
-        details = detail or state_text
+            state_text = f"{{state_text}} | {{reasoning_label}}"
 
         # Large image always hermes_logo
         large_image = "hermes_logo"
@@ -1009,6 +1353,10 @@ while True:
             reasoning_effort,
             str(SHOW_REASONING),
             str(PRIVACY_MODE),
+            str(workspace.get("project", "") if isinstance(workspace, dict) else ""),
+            str(workspace.get("git_branch", "") if isinstance(workspace, dict) else ""),
+            str(workspace.get("git_dirty", False) if isinstance(workspace, dict) else False),
+            target,
         ]
         new_hash = "|".join(hash_parts)
         now_mono = time.monotonic()

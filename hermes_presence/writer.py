@@ -9,6 +9,7 @@ Thread-safe: uses atomic writes (write to temp + rename).
 """
 
 import json
+import os
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -59,6 +60,77 @@ def _terminal_detail(command: str) -> str:
     return f"Shell: {_compact_command(cmd)}"
 
 
+def _basename(value: str) -> str:
+    """Return a compact basename for a path-like value."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return Path(text).name or text
+
+
+def _target_from_tool_params(tool_name: str, params: Optional[dict]) -> str:
+    """Extract a safe display target from tool parameters."""
+    if not params:
+        return ""
+    for key in ("path", "file_path", "filename"):
+        value = params.get(key)
+        if isinstance(value, str) and value.strip():
+            return _basename(value)
+    if tool_name == "terminal":
+        command = str(params.get("command", ""))
+        lower = command.lower()
+        if "pytest" in lower:
+            return "pytest"
+        if "vitest" in lower:
+            return "vitest"
+        if "pnpm" in lower:
+            return "pnpm"
+        if "npm" in lower:
+            return "npm"
+    return ""
+
+
+def _git_context(cwd: str) -> tuple[str, bool]:
+    """Return git branch and dirty state for cwd, best-effort and quiet."""
+    if not cwd:
+        return "", False
+    try:
+        branch = subprocess.run(
+            ["git", "-C", cwd, "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        if branch.returncode != 0:
+            return "", False
+        branch_name = branch.stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", cwd, "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        return branch_name, bool(dirty.stdout.strip()) if dirty.returncode == 0 else False
+    except Exception:
+        return "", False
+
+
+def _workspace_context() -> dict[str, object]:
+    """Return current project context for Discord display."""
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = ""
+    project = _basename(cwd)
+    branch, dirty = _git_context(cwd)
+    return {
+        "cwd": cwd,
+        "project": project,
+        "git_branch": branch,
+        "git_dirty": dirty,
+    }
+
+
 class PresenceWriter:
     """Writes state updates to presence.json for Discord monitor consumption.
 
@@ -76,6 +148,7 @@ class PresenceWriter:
         self._state_file = state_file or DEFAULT_STATE_FILE
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         self._session_id = session_id
+        self._is_tui = bool(os.environ.get("HERMES_TUI_ACTIVE_SESSION_FILE"))
         self._session_start = datetime.now(timezone.utc)
         self._tool_calls_count = 0
         self._files_modified = 0
@@ -92,6 +165,7 @@ class PresenceWriter:
         self._tool_started_at: Optional[str] = None
         self._error_msg: Optional[str] = None
         self._subagent_tasks: list[str] = []
+        self._current_target: str = ""
 
     def _restore_from_state_file(self):
         """Restore model/provider and session stats from the existing state file.
@@ -220,6 +294,7 @@ class PresenceWriter:
     def tool_call(self, tool_name: str, params: Optional[dict] = None):
         """Record a tool call in progress."""
         self._current_tool = tool_name
+        self._current_target = _target_from_tool_params(tool_name, params)
         self._tool_calls_count += 1
         self._tool_started_at = datetime.now(timezone.utc).isoformat()
 
@@ -292,6 +367,7 @@ class PresenceWriter:
 
     def reading(self, path: str = ""):
         """Signal file reading activity."""
+        self._current_target = _basename(path)
         self._write_state(
             state="reading",
             tool="read_file",
@@ -333,6 +409,7 @@ class PresenceWriter:
     def idle(self):
         """Clear to idle state. Shows orchestrating if sub-agents are active."""
         self._current_tool = None
+        self._current_target = ""
         self._tool_started_at = None
 
         # If sub-agents are active, show orchestrating state instead of idle
@@ -380,6 +457,7 @@ class PresenceWriter:
             summary_parts.append(f"{self._subagent_count} sub-agents")
 
         self._current_tool = None
+        self._current_target = ""
         self._tool_started_at = None
 
         self._write_state(
@@ -439,6 +517,7 @@ class PresenceWriter:
             "activity": {
                 "state": state,
                 "tool": tool if tool is not None else self._current_tool,
+                "target": self._current_target,
                 "detail": detail,
                 "large_image": large_image,
                 "kanban_phase": self._kanban_phase,
@@ -446,8 +525,9 @@ class PresenceWriter:
                 "is_error": state == "error",
                 "error_msg": self._error_msg if state == "error" else None,
             },
+            "workspace": _workspace_context(),
             "session": {
-                "id": self._session_start.strftime("%Y%m%d_%H%M%S"),
+                "id": self._session_id or self._session_start.strftime("%Y%m%d_%H%M%S"),
                 "source": self._profile,
                 "started_at": self._session_start.isoformat(),
                 "duration_seconds": session_seconds,
@@ -458,6 +538,7 @@ class PresenceWriter:
                 "subagent_count": self._subagent_count,
                 "files_modified": self._files_modified,
                 "cost_usd": round(self._cost_usd, 6),
+                "is_tui": self._is_tui,
                 "is_cron": self._is_cron,
                 "is_orchestrator": self._is_orchestrator,
             },

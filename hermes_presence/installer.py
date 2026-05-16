@@ -128,6 +128,7 @@ def _install_platform(
                 profile=profile,
                 show_reasoning=cfg.display.show_reasoning,
                 privacy_mode=cfg.display.privacy_mode,
+                tui_only=cfg.display.tui_only,
             )
         else:
             print(f"[SKIP] No auto-start mechanism for platform: {platform}")

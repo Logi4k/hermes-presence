@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from .config import get_state_file_path, is_disabled
+from .config import get_state_file_path, is_disabled, load_config
 from .writer import get_writer
 
 # Check for cron markers
@@ -41,12 +41,14 @@ _PROFILE = os.environ.get("HERMES_PROFILE", "main")
 
 # Session ID detection (TUI/gateway sessions get unique files)
 _SESSION_ID = ""
+_IS_TUI_SESSION = False
 try:
     _tui_session_file = os.environ.get("HERMES_TUI_ACTIVE_SESSION_FILE", "").strip()
     if _tui_session_file:
         import json as _json
         with open(_tui_session_file) as _f:
             _SESSION_ID = _json.load(_f).get("session_id", "")
+        _IS_TUI_SESSION = bool(_SESSION_ID)
 except Exception:
     pass
 
@@ -56,6 +58,15 @@ if not _SESSION_ID:
 
 # Per-session state file path (eliminates multi-session contention)
 _STATE_FILE = get_state_file_path(_PROFILE, _SESSION_ID)
+
+
+def _presence_suppressed() -> bool:
+    if is_disabled():
+        return True
+    try:
+        return bool(load_config().display.tui_only and not _IS_TUI_SESSION)
+    except Exception:
+        return False
 
 
 def _reasoning_effort_from_agent(agent=None) -> str:
@@ -100,7 +111,7 @@ def on_session_start(context: dict):
         profile: str      - Hermes profile name
         thinking: bool    - whether model is streaming
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -131,7 +142,7 @@ def on_tool_start(context: dict):
         tool_name: str
         params: dict
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -149,7 +160,7 @@ def on_tool_end(context: dict):
     Called when a tool execution completes.
     Returns to idle if no other tool is active.
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -174,7 +185,7 @@ def on_tool_error(context: dict):
     """
     Called when a tool execution fails with an error.
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -192,7 +203,7 @@ def on_thinking(context: dict):
     This is triggered during the generation phase before the
     assistant's response is sent.
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -210,7 +221,7 @@ def on_model_info(context: dict):
         provider: str
         cost_usd: float (optional)
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -243,7 +254,7 @@ def on_subagent_change(context: dict):
         count: int      - current subagent count
         delta: int      - change (+1 for spawn, -1 for complete)
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -272,7 +283,7 @@ def on_kanban_phase(context: dict):
     context contains:
         phase: str | None   - current phase or None to clear
     """
-    if is_disabled():
+    if _presence_suppressed():
         return
 
     writer = get_writer(_STATE_FILE)
@@ -431,7 +442,7 @@ def auto_setup(agent=None):
     Returns:
         PresenceWriter instance or None if disabled.
     """
-    if is_disabled():
+    if _presence_suppressed():
         return None
 
     writer = get_writer(_STATE_FILE)

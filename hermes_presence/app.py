@@ -85,6 +85,7 @@ def _cmd_status(args):
             "show_provider": cfg.display.show_provider,
             "show_reasoning": cfg.display.show_reasoning,
             "privacy_mode": cfg.display.privacy_mode,
+            "tui_only": cfg.display.tui_only,
             "poll_interval": cfg.advanced.poll_interval,
             "excluded_tools": cfg.tools.exclude,
             "service": {"running": False, "auto_start": False, "pid": None, "pid_age_s": None},
@@ -97,7 +98,13 @@ def _cmd_status(args):
 
         platform = _detect_platform()
         try:
-            launcher = _get_launcher(platform, cfg.discord.client_id, state_file, profile=profile)
+            launcher = _get_launcher(
+                platform,
+                cfg.discord.client_id,
+                state_file,
+                profile=profile,
+                tui_only=cfg.display.tui_only,
+            )
             if launcher:
                 s = launcher.status()
                 result["service"]["running"] = s.get("running", False)
@@ -155,6 +162,7 @@ def _cmd_status(args):
     print(f"  Show provider:  {cfg.display.show_provider}")
     print(f"  Show reasoning: {cfg.display.show_reasoning}")
     print(f"  Privacy mode:   {cfg.display.privacy_mode}")
+    print(f"  TUI only:       {cfg.display.tui_only}")
     print(f"  Poll interval:  {cfg.advanced.poll_interval}s")
     if cfg.notify.url:
         events_str = ", ".join(cfg.notify.events) if cfg.notify.events else "all"
@@ -169,7 +177,13 @@ def _cmd_status(args):
     platform = _detect_platform()
 
     try:
-        launcher = _get_launcher(platform, cfg.discord.client_id, state_file, profile=profile)
+        launcher = _get_launcher(
+            platform,
+            cfg.discord.client_id,
+            state_file,
+            profile=profile,
+            tui_only=cfg.display.tui_only,
+        )
         if launcher:
             s = launcher.status()
             print("Service Status")
@@ -301,6 +315,7 @@ def _cmd_config(args):
         print(f"  display.show_provider = {cfg.display.show_provider}")
         print(f"  display.show_reasoning = {cfg.display.show_reasoning}")
         print(f"  display.privacy_mode  = {cfg.display.privacy_mode}")
+        print(f"  display.tui_only      = {cfg.display.tui_only}")
         print(f"  display.idle_timeout  = {cfg.display.idle_timeout}s")
         print(f"  display.large_image   = {cfg.display.large_image}")
         print(f"  display.large_text    = {cfg.display.large_text}")
@@ -354,6 +369,7 @@ def _cmd_config(args):
         "show_provider",
         "show_reasoning",
         "privacy_mode",
+        "tui_only",
         "force_windows_ipc",
         "state_file_mirror",
         "hermes_github",
@@ -427,6 +443,7 @@ def _cmd_run(args):
         show_nexus_button=cfg.buttons.nexus_dashboard,
         custom_buttons=cfg.buttons.custom_urls,
         logger=log,
+        tui_only=cfg.display.tui_only,
     )
 
     try:
@@ -486,7 +503,13 @@ def _cmd_restart(args):
     profile = getattr(args, "profile", "main")
     state_file = get_state_file_path(profile=profile)
 
-    launcher = _get_launcher(platform, cfg.discord.client_id, state_file, profile=profile)
+    launcher = _get_launcher(
+        platform,
+        cfg.discord.client_id,
+        state_file,
+        profile=profile,
+        tui_only=cfg.display.tui_only,
+    )
     if not launcher:
         print(f"ERROR: No launcher for platform {platform}")
         sys.exit(1)
@@ -614,7 +637,13 @@ def _cmd_cleanup_state(args):
 
 
 
-def _get_launcher(platform: str, client_id: str, state_file, profile: str = "main"):
+def _get_launcher(
+    platform: str,
+    client_id: str,
+    state_file,
+    profile: str = "main",
+    tui_only: bool = False,
+):
     """Get the platform launcher for the given OS."""
     try:
         if platform == "linux":
@@ -628,7 +657,7 @@ def _get_launcher(platform: str, client_id: str, state_file, profile: str = "mai
         elif platform in ("windows", "wsl2"):
             from .platforms.windows import WindowsLauncher
 
-            return WindowsLauncher(client_id, state_file, profile=profile)
+            return WindowsLauncher(client_id, state_file, profile=profile, tui_only=tui_only)
     except ImportError:
         pass
     return None

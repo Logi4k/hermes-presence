@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from hermes_presence import app, config as config_mod
-from hermes_presence.monitor import UnifiedMonitor
+from hermes_presence.monitor import UnifiedMonitor, _format_presence_lines
 from hermes_presence.platforms import windows
 
 
@@ -19,13 +19,13 @@ class Args:
     log_file = None
 
 
-def test_presence_config_defaults_are_privacy_safe():
+def test_presence_config_defaults_are_explicitly_non_verbose():
     cfg = config_mod.PresenceConfig()
 
     assert cfg.display.show_model is False
     assert cfg.display.show_provider is False
     assert cfg.display.show_reasoning is False
-    assert cfg.display.privacy_mode is True
+    assert cfg.display.privacy_mode is False
     assert cfg.display.show_profile is False
     assert cfg.display.show_cost is False
     assert cfg.display.provider_logo_mode is False
@@ -57,6 +57,20 @@ def test_status_json_includes_reasoning_effort(tmp_path, monkeypatch, capsys):
 
     data = json.loads(capsys.readouterr().out)
     assert data["session"]["reasoning_effort"] == "high"
+
+
+def test_presence_lines_prioritise_model_project_branch_and_file():
+    details, state_text = _format_presence_lines(
+        "working",
+        "patch",
+        "Editing file",
+        "GPT-5.5",
+        {"project": "hermes-presence", "git_branch": "main", "git_dirty": True},
+        "monitor.py",
+    )
+
+    assert details == "GPT-5.5 editing hermes-presence"
+    assert state_text == "hermes-presence | main* | monitor.py"
 
 
 def test_monitor_can_hide_reasoning_and_apply_privacy_mode(tmp_path, monkeypatch):

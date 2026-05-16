@@ -37,7 +37,7 @@ class DisplayConfig:
     show_model: bool = False
     show_provider: bool = False
     show_reasoning: bool = False
-    privacy_mode: bool = True
+    privacy_mode: bool = False
     idle_timeout: int = 10
     large_image: str = "hermes_logo"
     large_text: str = "Hermes Agent"
@@ -49,6 +49,9 @@ class DisplayConfig:
     show_cost: bool = False
     # v3.4.0: dynamic provider logos
     provider_logo_mode: bool = False
+    # Only publish activity from live Hermes TUI sessions. This prevents
+    # Telegram/gateway/API sessions from taking over Discord presence.
+    tui_only: bool = False
 
 
 @dataclass
@@ -167,6 +170,7 @@ def load_config(config_path: Optional[Path] = None) -> PresenceConfig:
                     "show_profile",
                     "show_cost",
                     "provider_logo_mode",
+                    "tui_only",
                 ):
                     if key in dp:
                         setattr(config.display, key, bool(dp[key]))

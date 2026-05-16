@@ -18,6 +18,8 @@ def test_writer_creates_state_file():
         data = json.loads(state_file.read_text())
         assert data["activity"]["state"] == "idle"
         assert data["session"]["model"] == "test-model"
+        assert "workspace" in data
+        assert "project" in data["workspace"]
 
 
 def test_thinking_uses_polished_detail():
@@ -62,6 +64,17 @@ def test_process_tool_has_specific_label():
         data = json.loads(state_file.read_text())
         assert data["activity"]["detail"] == "Monitoring background process"
         assert data["activity"]["detail"] != "Using process"
+
+
+def test_writer_extracts_display_target_from_tool_params():
+    with tempfile.TemporaryDirectory() as tmp:
+        state_file = Path(tmp) / "presence.json"
+        writer = PresenceWriter(state_file=state_file)
+        writer.set_session("test-model", "test-provider")
+        writer.tool_call("read_file", {"path": "/mnt/e/project/monitor.py"})
+
+        data = json.loads(state_file.read_text())
+        assert data["activity"]["target"] == "monitor.py"
 
 
 def test_reviewing_tool_results_keeps_activity_visible_after_fast_tools():

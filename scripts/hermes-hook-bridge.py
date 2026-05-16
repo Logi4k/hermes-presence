@@ -31,7 +31,7 @@ _package_root = Path(__file__).resolve().parent.parent
 if str(_package_root) not in sys.path:
     sys.path.insert(0, str(_package_root))
 
-from hermes_presence.config import is_disabled, get_state_file_path  # noqa: E402
+from hermes_presence.config import is_disabled, get_state_file_path, load_config  # noqa: E402
 from hermes_presence.writer import get_writer  # noqa: E402
 
 # Profile detection
@@ -39,11 +39,13 @@ _PROFILE = os.environ.get("HERMES_PROFILE", "main")
 
 # Session ID detection (TUI/gateway sessions get unique state files)
 _SESSION_ID = ""
+_IS_TUI_SESSION = False
 try:
     _tui_session_file = os.environ.get("HERMES_TUI_ACTIVE_SESSION_FILE", "").strip()
     if _tui_session_file:
         with open(_tui_session_file) as _f:
             _SESSION_ID = json.load(_f).get("session_id", "")
+        _IS_TUI_SESSION = bool(_SESSION_ID)
 except Exception:
     pass
 if not _SESSION_ID:
@@ -193,6 +195,13 @@ def main():
         # Disabled — return empty JSON silently
         print(json.dumps({}))
         return 0
+
+    try:
+        if load_config().display.tui_only and not _IS_TUI_SESSION:
+            print(json.dumps({}))
+            return 0
+    except Exception:
+        pass
 
     # Read payload from stdin
     try:

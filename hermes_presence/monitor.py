@@ -54,10 +54,20 @@ ACTIVITY_MAP = {
 }
 
 
-def _find_latest_state_file(state_dir: Path) -> tuple[Path, dict] | tuple[None, None]:
-    """Scan for all presence_*.json files and return the newest by timestamp.
+def _state_session_id(data: dict) -> str:
+    session = data.get("session", {}) if isinstance(data, dict) else {}
+    return str(session.get("id", "") or "").strip()
 
-    Returns (path, parsed_data) or (None, None) if no valid files found.
+
+def _find_latest_state_file(
+    state_dir: Path,
+    allowed_session_ids: Optional[set[str]] = None,
+) -> tuple[Path, dict] | tuple[None, None]:
+    """Scan state files and return the newest by timestamp.
+
+    When allowed_session_ids is provided, only matching per-session TUI state
+    files are considered. This prevents Telegram/gateway state from winning
+    Discord presence arbitration.
     """
     if not state_dir.exists():
         return None, None
@@ -71,6 +81,8 @@ def _find_latest_state_file(state_dir: Path) -> tuple[Path, dict] | tuple[None, 
             if not ts_str:
                 continue
             ts = datetime.fromisoformat(ts_str)
+            if allowed_session_ids is not None and _state_session_id(data) not in allowed_session_ids:
+                continue
             ts_epoch = ts.timestamp()
             candidates.append((f, data, ts_epoch))
         except (json.JSONDecodeError, ValueError, OSError):
@@ -84,8 +96,11 @@ def _find_latest_state_file(state_dir: Path) -> tuple[Path, dict] | tuple[None, 
             ts_str = data.get("timestamp", "")
             if ts_str:
                 ts = datetime.fromisoformat(ts_str)
-                ts_epoch = ts.timestamp()
-                candidates.append((legacy, data, ts_epoch))
+                if allowed_session_ids is not None and _state_session_id(data) not in allowed_session_ids:
+                    pass
+                else:
+                    ts_epoch = ts.timestamp()
+                    candidates.append((legacy, data, ts_epoch))
         except (json.JSONDecodeError, ValueError, OSError):
             pass
 
@@ -139,6 +154,121 @@ def _resolve_provider_logo(provider: str) -> str:
         "openrouter": "openrouter_logo",
     }
     return PROVIDER_LOGO.get((provider or "").lower().strip(), "hermes_logo")
+
+
+def _session_ids_from_tui_session(session: dict[str, Any]) -> set[str]:
+    """Return all presence session IDs represented by one live TUI process."""
+    ids: set[str] = set()
+    session_id = str(session.get("session_id", "") or "").strip()
+    if session_id:
+        ids.add(session_id)
+    for key in session.get("descendant_session_keys", []) or []:
+        key = str(key or "").strip()
+        if key:
+            ids.add(key)
+    return ids
+
+
+def _active_tui_sessions(tui: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the visible Windows Terminal TUI sessions, falling back to all live TUIs."""
+    linux_sessions = [s for s in (tui.get("linux_sessions", []) or []) if isinstance(s, dict)]
+    visible_cwds = {
+        str(tab.get("cwd", "") or "").strip()
+        for tab in (tui.get("windows_terminal_tabs", []) or [])
+        if isinstance(tab, dict) and str(tab.get("cwd", "") or "").strip()
+    }
+    visible_tmux = {
+        str(tab.get("tmux_session", "") or "").strip()
+        for tab in (tui.get("windows_terminal_tabs", []) or [])
+        if isinstance(tab, dict) and str(tab.get("tmux_session", "") or "").strip()
+    }
+
+    visible_sessions: list[dict[str, Any]] = []
+    if visible_cwds or visible_tmux:
+        for session in linux_sessions:
+            cwd = str(session.get("cwd", "") or "").strip()
+            command = str(session.get("command", "") or "")
+            tmux_match = any(name and name in command for name in visible_tmux)
+            if (cwd and cwd in visible_cwds) or tmux_match:
+                visible_sessions.append(session)
+        if visible_sessions:
+            return visible_sessions
+
+    return linux_sessions
+
+
+def _active_tui_session_ids(tui: dict[str, Any]) -> set[str]:
+    """Extract presence session IDs for the active TUI sessions."""
+    ids: set[str] = set()
+    for session in _active_tui_sessions(tui):
+        ids.update(_session_ids_from_tui_session(session))
+    return ids
+
+
+def _state_age_seconds(data: dict[str, Any]) -> Optional[float]:
+    ts_str = str(data.get("timestamp", "") or "").strip()
+    if not ts_str:
+        return None
+    try:
+        return datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(ts_str).timestamp()
+    except ValueError:
+        return None
+
+
+def _project_from_cwd(cwd: str) -> str:
+    clean = str(cwd or "").rstrip("/")
+    if not clean:
+        return "Hermes"
+    return Path(clean).name or "Hermes"
+
+
+def _synthesise_active_tui_state(session: dict[str, Any], existing: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Build a safe fresh idle state when the active TUI's hook state is stale."""
+    existing = existing if isinstance(existing, dict) else {}
+    now = datetime.now(timezone.utc).isoformat()
+    session_ids = _session_ids_from_tui_session(session)
+    sid = str(existing.get("session", {}).get("id", "") or "").strip()
+    if not sid:
+        sid = next(iter(session_ids), "")
+    cwd = str(session.get("cwd", "") or "").strip()
+    old_session = existing.get("session", {}) if isinstance(existing.get("session"), dict) else {}
+    started_at = old_session.get("started_at") or now
+    return {
+        "version": 3,
+        "timestamp": now,
+        "profile": existing.get("profile", "main"),
+        "activity": {
+            "state": "idle",
+            "tool": None,
+            "target": "",
+            "detail": "Visible TUI active",
+            "large_image": "status_idle",
+            "tool_started_at": None,
+            "is_error": False,
+            "error_msg": None,
+        },
+        "workspace": {
+            "cwd": cwd,
+            "project": _project_from_cwd(cwd),
+            "git_branch": "",
+            "git_dirty": False,
+        },
+        "session": {
+            "id": sid,
+            "started_at": started_at,
+            "duration_seconds": 0,
+            "model": old_session.get("model", "unknown"),
+            "provider": old_session.get("provider", "unknown"),
+            "reasoning_effort": old_session.get("reasoning_effort", ""),
+            "tool_calls_count": old_session.get("tool_calls_count", 0),
+            "subagent_count": old_session.get("subagent_count", 0),
+            "files_modified": old_session.get("files_modified", 0),
+            "cost_usd": old_session.get("cost_usd", 0.0),
+            "is_tui": True,
+            "is_cron": False,
+            "is_orchestrator": False,
+        },
+    }
 
 
 def _load_cost(cost_file: Optional[Path]) -> tuple[float, str]:
@@ -287,6 +417,86 @@ def _format_duration(seconds: int) -> str:
     return f"{hours}h {mins % 60}m"
 
 
+def _clip(value: str, max_len: int = 128) -> str:
+    """Clip Discord field text safely."""
+    text = str(value or "")
+    return text if len(text) <= max_len else text[: max_len - 3].rstrip() + "..."
+
+
+def _action_label(state_name: str, tool: str, detail: str) -> str:
+    """Turn raw hook state into a short, useful verb phrase."""
+    if state_name == "error":
+        return "hit an error"
+    if state_name in ("thinking", "typing"):
+        return "thinking"
+    if state_name == "idle":
+        return "ready"
+    if state_name == "orchestrating":
+        return "orchestrating"
+    if state_name == "cron_job":
+        return "running a cron job"
+    if state_name == "session_ended":
+        return "session ended"
+    lower_detail = str(detail or "").lower()
+    if "running tests" in lower_detail:
+        return "running tests"
+    if "checking code quality" in lower_detail:
+        return "checking code"
+    if "reviewing code changes" in lower_detail:
+        return "reviewing changes"
+    if tool in {"patch", "write_file", "skill_manage"}:
+        return "editing"
+    if tool in {"read_file", "search_files", "web_search", "web_extract", "session_search", "mem0local_search"}:
+        return "researching"
+    if tool.startswith("browser_"):
+        return "browsing"
+    if tool.startswith("delegate_") or tool == "delegate_task":
+        return "delegating"
+    if state_name == "working":
+        return "working"
+    return state_name.replace("_", " ") or "working"
+
+
+def _workspace_parts(workspace: dict[str, Any], target: str) -> list[str]:
+    """Build project/branch/file parts for the lower Discord line."""
+    parts: list[str] = []
+    project = str(workspace.get("project", "") or "").strip()
+    branch = str(workspace.get("git_branch", "") or "").strip()
+    dirty = bool(workspace.get("git_dirty", False))
+    target = str(target or "").strip()
+    if project:
+        parts.append(project)
+    if branch:
+        parts.append(f"{branch}{'*' if dirty else ''}")
+    if target:
+        parts.append(target)
+    return parts
+
+
+def _format_presence_lines(
+    state_name: str,
+    tool: str,
+    detail: str,
+    model_label: str,
+    workspace: dict[str, Any],
+    target: str,
+) -> tuple[str, str]:
+    """Return (details, state) for a cleaner Discord presence layout."""
+    action = _action_label(state_name, tool, detail)
+    lead = model_label or "Hermes"
+    project = str(workspace.get("project", "") or "").strip()
+    if project and action not in {"ready", "session ended"}:
+        details = f"{lead} {action} {project}"
+    else:
+        details = f"{lead} {action}"
+
+    state_parts = _workspace_parts(workspace, target)
+    if not state_parts and detail:
+        state_parts = [detail]
+    state_text = " | ".join(state_parts) or action.capitalize()
+    return _clip(details), _clip(state_text)
+
+
 class UnifiedMonitor:
     """Cross-platform Discord presence monitor."""
 
@@ -314,6 +524,7 @@ class UnifiedMonitor:
         provider_logo_mode: bool = False,
         zombie_timeout_multiplier: int = 2,
         cost_tracker_file: Optional[Path] = None,
+        tui_only: bool = False,
     ):
         if not PYPRESENCE_AVAILABLE:
             raise RuntimeError("pypresence is required. Install: pip install pypresence")
@@ -340,6 +551,7 @@ class UnifiedMonitor:
         self.provider_logo_mode = provider_logo_mode
         self.zombie_timeout_multiplier = zombie_timeout_multiplier
         self.cost_tracker_file = cost_tracker_file
+        self.tui_only = tui_only
         self._last_seen_timestamp: Optional[float] = None
         self._zombie_cleared = False
         self._daily_cost: float = 0.0
@@ -541,16 +753,34 @@ class UnifiedMonitor:
 
     def _poll_once(self):
         """Read state file(s), pick newest by timestamp, push to Discord if changed."""
-        state_file, state = _find_latest_state_file(self.state_file.parent)
-
         # v3.4.0 F6: zero TUI sessions + no valid state -> clear
         tui_count = 0
+        active_tui_ids: set[str] = set()
+        active_tui_sessions: list[dict[str, Any]] = []
         try:
             from .tui_sessions import detect_tui_sessions
             tui = detect_tui_sessions()
             tui_count = tui.get("count", 0)
+            active_tui_sessions = _active_tui_sessions(tui)
+            active_tui_ids = _active_tui_session_ids(tui)
         except Exception:
             pass
+
+        allowed_ids = active_tui_ids if self.tui_only else None
+        state_file, state = _find_latest_state_file(self.state_file.parent, allowed_session_ids=allowed_ids)
+        if self.tui_only and state is not None and active_tui_sessions:
+            stale_after = max(60, int(self.poll_interval) * 3)
+            state_age = _state_age_seconds(state)
+            if state_age is not None and state_age >= stale_after:
+                selected_sid = _state_session_id(state)
+                selected_session = next(
+                    (
+                        session for session in active_tui_sessions
+                        if selected_sid in _session_ids_from_tui_session(session)
+                    ),
+                    active_tui_sessions[0],
+                )
+                state = _synthesise_active_tui_state(selected_session, state)
 
         # Only clear immediately if zero TUI, no state, and we had something showing
         if tui_count == 0 and self.last_hash and state is None:
@@ -640,10 +870,10 @@ class UnifiedMonitor:
 
         # ---- Activity template ----
         template = ACTIVITY_MAP.get(state_name, ("Active", None))
-        state_text = template[0]
-        details = detail or template[1] or ""
-        if len(details) > 128:
-            details = details[:125] + "..."
+        target = act.get("target", "") or ""
+        workspace = state.get("workspace", {})
+        if not isinstance(workspace, dict):
+            workspace = {}
 
         # ---- Model + provider display ----
         model_label = ""
@@ -653,8 +883,17 @@ class UnifiedMonitor:
                 sess.get("provider", ""),
                 show_provider=self.show_provider,
             )
-        if model_label:
-            state_text = f"{state_text} -- {model_label}"
+        details, state_text = _format_presence_lines(
+            state_name,
+            tool,
+            detail or template[1] or "",
+            model_label,
+            workspace,
+            target,
+        )
+        if self.privacy_mode:
+            details = _clip(detail or "Working privately")
+            state_text = template[0]
 
         if self.show_reasoning and not self.privacy_mode:
             reasoning_label = _format_reasoning_label(sess.get("reasoning_effort", ""))
@@ -765,6 +1004,10 @@ class UnifiedMonitor:
             profile,
             large_image,
             cost_display,
+            str(workspace.get("project", "")),
+            str(workspace.get("git_branch", "")),
+            str(workspace.get("git_dirty", False)),
+            target,
         ]
 
         new_hash = "|".join(hash_parts)
@@ -851,4 +1094,5 @@ def create_monitor(
         show_hermes_button=cfg.buttons.hermes_github,
         show_nexus_button=cfg.buttons.nexus_dashboard,
         custom_buttons=cfg.buttons.custom_urls,
+        tui_only=cfg.display.tui_only,
     )
